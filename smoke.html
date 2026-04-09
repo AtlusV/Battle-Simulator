@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smoke</title>
+  <link rel="stylesheet" href="styles.css">
+  <script defer src="move-data.js"></script>
+  <script defer src="battle-data.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <script>
+    window.addEventListener("DOMContentLoaded", () => {
+      fetch("smoke-save.json")
+        .then((response) => response.text())
+        .then((text) => {
+          loadSave(text, "smoke-save.json");
+          cloneAlphaToBeta();
+          startBattle();
+          setBattleAction("alpha", { type: "move", moveIndex: 0 });
+          setBattleAction("beta", { type: "move", moveIndex: 0 });
+          resolveBattleTurn();
+          document.body.insertAdjacentHTML("beforeend", '<p id="smoke-finished">Smoke Finished</p>');
+        })
+        .catch((error) => {
+          document.body.insertAdjacentHTML("beforeend", `<pre id="smoke-error">${String(error)}</pre>`);
+        });
+    });
+  </script>
+</body>
+</html>

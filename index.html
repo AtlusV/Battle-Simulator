@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark">
+  <title>Dinodex Showdown Builder</title>
+  <link rel="stylesheet" href="styles.css">
+  <script defer src="move-data.js"></script>
+  <script defer src="battle-data.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="masthead panel">
+      <div class="hero-copy">
+        <p class="eyebrow">Custom Dex Team Builder</p>
+        <h1>Dinodex Battle Studio</h1>
+        <p class="hero-text">
+          Load your Dinodex Studio save, build a Showdown-style roster with held items,
+          then pit two six-slot teams against each other in a local battle sandbox.
+          Abilities are still intentionally skipped, and custom moves can be given battle-ready effects in the Move Lab.
+        </p>
+      </div>
+
+      <div class="action-cluster">
+        <label class="button accent file-button">
+          <span>Load Dinodex Save</span>
+          <input id="file-input" type="file" accept=".json,application/json">
+        </label>
+        <button id="reset-button" class="button subtle" type="button">Reset Team A</button>
+        <button id="download-save-button" class="button subtle" type="button">Download Updated Save</button>
+        <button id="export-button" class="button subtle" type="button">Refresh Showdown Export</button>
+      </div>
+
+      <div class="status-row">
+        <div class="status-pill">
+          <span class="status-label">Status</span>
+          <strong id="status-text">Load a Dinodex save to begin.</strong>
+        </div>
+        <p id="file-name" class="file-name">No save loaded</p>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <section class="panel team-panel">
+        <div class="panel-head with-controls">
+          <div>
+            <p class="section-kicker">Roster Builder</p>
+            <h2>Build Two Teams</h2>
+          </div>
+
+          <div class="panel-actions">
+            <div id="roster-tabs" class="segmented-control" aria-label="Roster tabs"></div>
+            <div class="action-cluster compact">
+              <button id="clone-team-button" class="button subtle" type="button">Copy Team A To Team B</button>
+              <button id="clear-opponent-button" class="button subtle" type="button">Clear Team B</button>
+            </div>
+          </div>
+        </div>
+
+        <p class="panel-note">Team A round-trips to your save. Team B stays local for battle testing.</p>
+        <div id="selected-slot-strip" class="selected-slot-strip"></div>
+        <div id="team-builder" class="team-builder"></div>
+      </section>
+
+      <section class="panel dex-panel">
+        <div class="panel-head with-controls">
+          <div>
+            <p class="section-kicker">Custom Dex</p>
+            <h2>Browse Species</h2>
+          </div>
+
+          <div class="filter-bar">
+            <label class="field">
+              <span>Search</span>
+              <input id="search-input" type="search" placeholder="Search by name, form, or type">
+            </label>
+
+            <label class="field">
+              <span>Type</span>
+              <select id="type-filter"></select>
+            </label>
+          </div>
+        </div>
+
+        <div class="dex-layout">
+          <div id="dex-list" class="dex-list"></div>
+          <aside id="dex-detail" class="dex-detail empty">
+            <p>Load a save to inspect stats, forms, sprites, and descriptions.</p>
+          </aside>
+        </div>
+      </section>
+
+      <section class="panel move-lab-panel">
+        <div class="panel-head with-controls">
+          <div>
+            <p class="section-kicker">Custom Move Lab</p>
+            <h2>Build Move Effects</h2>
+          </div>
+        </div>
+
+        <p class="panel-note left-note">Pick a custom Dinodex move, then build battle effects with buttons instead of hand-writing metadata.</p>
+
+        <div id="move-lab" class="move-lab"></div>
+      </section>
+
+      <section class="panel battle-panel">
+        <div class="panel-head with-controls">
+          <div>
+            <p class="section-kicker">Battle Arena</p>
+            <h2>Play Out The Matchup</h2>
+          </div>
+
+          <div class="action-cluster compact">
+            <button id="start-battle-button" class="button accent" type="button">Start Battle</button>
+            <button id="resolve-turn-button" class="button subtle" type="button" disabled>Resolve Turn</button>
+            <button id="reset-battle-button" class="button subtle" type="button">Reset Battle</button>
+          </div>
+        </div>
+
+        <div class="battle-topline">
+          <p id="battle-status" class="battle-status">Build Team A and Team B, then start a battle.</p>
+          <p id="battle-turn" class="battle-turn">Turn 0</p>
+        </div>
+
+        <div class="battle-grid">
+          <section id="battle-side-alpha" class="battle-side"></section>
+
+          <aside class="battle-center">
+            <div class="battle-center-card">
+              <p class="section-kicker">Queued Actions</p>
+              <div id="battle-pending" class="battle-pending"></div>
+            </div>
+
+            <div class="battle-center-card battle-log-card">
+              <p class="section-kicker">Battle Log</p>
+              <div id="battle-log" class="battle-log"></div>
+            </div>
+          </aside>
+
+          <section id="battle-side-beta" class="battle-side"></section>
+        </div>
+      </section>
+
+      <section class="panel export-panel">
+        <div class="panel-head with-controls">
+          <div>
+            <p class="section-kicker">Showdown Import</p>
+            <h2>Import Or Export Sets</h2>
+          </div>
+
+          <div class="action-cluster compact">
+            <button id="import-button" class="button subtle" type="button">Import Text To Active Team</button>
+            <button id="copy-button" class="button subtle" type="button">Copy Export</button>
+          </div>
+        </div>
+
+        <p id="export-roster-label" class="panel-note left-note">The export box follows the active roster tab.</p>
+
+        <label class="field textarea-field">
+          <span>Showdown Text</span>
+          <textarea
+            id="showdown-text"
+            spellcheck="false"
+            placeholder="Showdown export will appear here. You can also paste Showdown text here and import it into the active roster."
+          ></textarea>
+        </label>
+      </section>
+    </main>
+
+    <footer class="footnote">
+      <p>Battle notes: this local simulator handles HP, damage, items, status, recoil, recovery, and stat-stage changes, but still skips abilities and some niche move edge cases.</p>
+    </footer>
+  </div>
+
+  <datalist id="move-options"></datalist>
+  <datalist id="item-options"></datalist>
+
+  <noscript>
+    <div class="noscript-banner">This builder needs JavaScript enabled.</div>
+  </noscript>
+</body>
+</html>
