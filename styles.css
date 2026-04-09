@@ -118,28 +118,35 @@ button {
   margin-top: 18px;
   display: grid;
   gap: 18px;
-  grid-template-columns: minmax(360px, 520px) minmax(420px, 1fr);
+  grid-template-columns: 1fr;
   grid-template-areas:
-    "team dex"
-    "moves moves"
-    "battle battle"
-    "export export";
+    "maintabs"
+    "buildertabs"
+    "builder"
+    "battle"
+    "export";
+}
+
+.main-tabs-panel {
+  grid-area: maintabs;
+  padding: 14px 22px;
+}
+
+.builder-tabs-panel {
+  grid-area: buildertabs;
+  padding: 14px 22px;
 }
 
 .team-panel {
-  grid-area: team;
+  grid-area: builder;
 }
 
 .dex-panel {
-  grid-area: dex;
+  grid-area: builder;
 }
 
 .battle-panel {
   grid-area: battle;
-}
-
-.move-lab-panel {
-  grid-area: moves;
 }
 
 .export-panel {
@@ -147,11 +154,18 @@ button {
 }
 
 .team-panel,
-.move-lab-panel,
 .dex-panel,
 .battle-panel,
 .export-panel {
   padding: 22px;
+}
+
+.hidden-panel {
+  display: none;
+}
+
+.main-hidden {
+  display: none;
 }
 
 .panel-head {
@@ -182,6 +196,19 @@ button {
 .panel-note.left-note {
   text-align: left;
   max-width: none;
+}
+
+.builder-topline {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: end;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.builder-slot-picker {
+  min-width: min(100%, 320px);
 }
 
 .action-cluster {
@@ -297,73 +324,6 @@ button {
   grid-template-columns: minmax(190px, 1fr) minmax(150px, 190px);
 }
 
-.move-lab {
-  display: grid;
-  gap: 16px;
-}
-
-.move-lab-empty {
-  padding: 18px;
-  border-radius: var(--radius-lg);
-  border: 1px dashed rgba(255, 255, 255, 0.12);
-  color: var(--muted);
-  background: rgba(255, 255, 255, 0.03);
-}
-
-.move-lab-summary {
-  display: grid;
-  gap: 12px;
-  grid-template-columns: minmax(220px, 320px) 1fr;
-  align-items: start;
-}
-
-.move-lab-card,
-.modifier-row {
-  border-radius: var(--radius-lg);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.04);
-  padding: 14px;
-}
-
-.move-lab-card h3,
-.move-lab-card h4 {
-  margin: 0 0 8px;
-}
-
-.modifier-list {
-  display: grid;
-  gap: 12px;
-}
-
-.modifier-row {
-  display: grid;
-  gap: 12px;
-}
-
-.modifier-grid {
-  display: grid;
-  gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-}
-
-.modifier-actions {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  align-items: center;
-}
-
-.modifier-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border-radius: 999px;
-  color: var(--muted);
-  background: rgba(var(--accent-rgb), 0.08);
-  border: 1px solid rgba(var(--accent-rgb), 0.22);
-}
-
 .is-hidden {
   display: none;
 }
@@ -407,41 +367,6 @@ textarea {
   resize: vertical;
   font-family: Consolas, "Courier New", monospace;
   line-height: 1.55;
-}
-
-.selected-slot-strip {
-  display: grid;
-  gap: 10px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  margin-bottom: 18px;
-}
-
-.slot-tab {
-  border-radius: var(--radius-md);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--ink);
-  padding: 0.85rem 0.95rem;
-  text-align: left;
-  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
-}
-
-.slot-tab strong,
-.slot-tab span {
-  display: block;
-}
-
-.slot-tab span {
-  margin-top: 0.25rem;
-  color: var(--muted);
-  font-size: 0.88rem;
-}
-
-.slot-tab.active {
-  border-color: rgba(var(--accent-rgb), 0.56);
-  background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.18), rgba(255, 255, 255, 0.06));
-  transform: translateY(-2px);
-  box-shadow: 0 0 var(--accent-glow) rgba(var(--accent-rgb), 0.12);
 }
 
 .team-builder {
@@ -923,7 +848,8 @@ textarea {
 .team-panel,
 .battle-panel,
 .export-panel,
-.move-lab-panel {
+.main-tabs-panel,
+.builder-tabs-panel {
   min-width: 0;
 }
 
@@ -996,16 +922,6 @@ textarea {
 }
 
 @media (max-width: 1280px) {
-  .workspace {
-    grid-template-columns: 1fr;
-    grid-template-areas:
-      "team"
-      "moves"
-      "dex"
-      "battle"
-      "export";
-  }
-
   .dex-layout,
   .battle-grid {
     grid-template-columns: 1fr;
@@ -1018,7 +934,6 @@ textarea {
 }
 
 @media (max-width: 1040px) {
-  .move-lab-summary,
   .dex-layout,
   .battle-grid {
     grid-template-columns: 1fr;
@@ -1036,10 +951,6 @@ textarea {
     order: 2;
   }
 
-  .selected-slot-strip {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .move-grid,
   .meta-grid.wide {
     grid-template-columns: 1fr;
@@ -1053,8 +964,9 @@ textarea {
   }
 
   .masthead,
+  .main-tabs-panel,
+  .builder-tabs-panel,
   .team-panel,
-  .move-lab-panel,
   .dex-panel,
   .battle-panel,
   .export-panel {
@@ -1073,7 +985,6 @@ textarea {
     justify-content: stretch;
   }
 
-  .selected-slot-strip,
   .move-grid,
   .meta-grid,
   .meta-grid.wide,
@@ -1110,8 +1021,7 @@ textarea {
   }
 
   .slot-actions,
-  .detail-actions,
-  .modifier-actions {
+  .detail-actions {
     flex-direction: column;
     align-items: stretch;
   }
@@ -1151,8 +1061,9 @@ textarea {
   }
 
   .masthead,
+  .main-tabs-panel,
+  .builder-tabs-panel,
   .team-panel,
-  .move-lab-panel,
   .dex-panel,
   .battle-panel,
   .export-panel {
@@ -1163,10 +1074,6 @@ textarea {
   .masthead h1 {
     font-size: clamp(1.9rem, 11vw, 2.8rem);
     max-width: none;
-  }
-
-  .selected-slot-strip {
-    grid-template-columns: 1fr;
   }
 
   .team-slot,

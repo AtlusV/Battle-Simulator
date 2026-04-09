@@ -95,6 +95,8 @@ const state = {
   speciesById: new Map(),
   speciesLookup: new Map(),
   activeRosterKey: "alpha",
+  activeMainTab: "builder",
+  activeBuilderTab: "team",
   selectedSpeciesId: "",
   customMoves: [],
   customMoveById: new Map(),
@@ -118,15 +120,18 @@ function init() {
   seedMoveDatalist();
   seedItemDatalist();
   bindEvents();
+  renderMainTabs();
+  renderBuilderTabs();
   renderTypeFilter();
   renderRosterTabs();
   renderSelectedSlotStrip();
   renderTeamBuilder();
-  renderMoveLab();
   renderDexList();
   renderDexDetail();
   refreshShowdownPanel();
   renderBattle();
+  renderMainPanels();
+  renderBuilderPanels();
 }
 
 function cacheDom() {
@@ -145,12 +150,17 @@ function cacheDom() {
   dom.fileName = document.getElementById("file-name");
   dom.searchInput = document.getElementById("search-input");
   dom.typeFilter = document.getElementById("type-filter");
+  dom.mainTabs = document.getElementById("main-tabs");
+  dom.builderTabs = document.getElementById("builder-tabs");
   dom.rosterTabs = document.getElementById("roster-tabs");
-  dom.selectedSlotStrip = document.getElementById("selected-slot-strip");
+  dom.selectedSlotStrip = document.getElementById("selected-slot-select");
   dom.teamBuilder = document.getElementById("team-builder");
-  dom.moveLab = document.getElementById("move-lab");
+  dom.teamPanel = document.getElementById("team-panel");
   dom.dexList = document.getElementById("dex-list");
   dom.dexDetail = document.getElementById("dex-detail");
+  dom.dexPanel = document.getElementById("dex-panel");
+  dom.battlePanel = document.getElementById("battle-panel");
+  dom.exportPanel = document.getElementById("export-panel");
   dom.showdownText = document.getElementById("showdown-text");
   dom.exportRosterLabel = document.getElementById("export-roster-label");
   dom.moveOptions = document.getElementById("move-options");
@@ -189,14 +199,14 @@ function bindEvents() {
     renderDexList();
   });
 
+  dom.mainTabs.addEventListener("click", handleMainTabClick);
+  dom.builderTabs.addEventListener("click", handleBuilderTabClick);
   dom.rosterTabs.addEventListener("click", handleRosterTabClick);
-  dom.selectedSlotStrip.addEventListener("click", handleSlotStripClick);
+  dom.selectedSlotStrip.addEventListener("change", handleSlotStripClick);
   dom.teamBuilder.addEventListener("click", handleTeamBuilderClick);
   dom.teamBuilder.addEventListener("change", handleTeamBuilderChange);
   dom.teamBuilder.addEventListener("input", handleTeamBuilderInput);
   dom.teamBuilder.addEventListener("focusout", handleTeamBuilderFocusOut);
-  dom.moveLab.addEventListener("change", handleMoveLabChange);
-  dom.moveLab.addEventListener("click", handleMoveLabClick);
   dom.dexList.addEventListener("click", handleDexListClick);
   dom.dexDetail.addEventListener("click", handleDexDetailClick);
   dom.battleSideAlpha.addEventListener("click", handleBattleSideClick);
@@ -243,6 +253,8 @@ function loadSave(fileText, fileName) {
   state.searchTerm = "";
   state.typeFilter = "all";
   state.activeRosterKey = "alpha";
+  state.activeMainTab = "builder";
+  state.activeBuilderTab = "team";
   dom.searchInput.value = "";
   applyTheme(parsed.theme);
 
@@ -258,14 +270,17 @@ function loadSave(fileText, fileName) {
 
   dom.fileName.textContent = fileName;
   renderTypeFilter();
+  renderMainTabs();
+  renderBuilderTabs();
   renderRosterTabs();
   renderSelectedSlotStrip();
   renderTeamBuilder();
-  renderMoveLab();
   renderDexList();
   renderDexDetail();
   refreshShowdownPanel();
   renderBattle();
+  renderMainPanels();
+  renderBuilderPanels();
 
   let message = `Loaded ${state.speciesList.length} species and ${loaded.team.length} Team A slots from ${fileName}.`;
   if (loaded.ignoredMoves) message += ` Ignored ${loaded.ignoredMoves} unknown move${loaded.ignoredMoves === 1 ? "" : "s"}.`;
@@ -273,7 +288,7 @@ function loadSave(fileText, fileName) {
 }
 
 function buildSpeciesList(rawPokedex) {
-  return rawPokedex.map((entry) => {
+  return rawPokedex.filter((entry) => toId(entry?.name) !== "globidens").map((entry) => {
     const baseName = cleanText(entry.name);
     const form = cleanText(entry.form) || "Base";
     const customFormName = cleanText(entry.customFormName);
@@ -350,7 +365,7 @@ function buildCustomMoveList(rawMovedex) {
     const rawName = cleanText(entry.rawName || entry.name);
     const name = cleanText(entry.name || rawName);
     const category = normalizeMoveCategory(entry.category);
-    const battle = normalizeCustomMoveBattle(entry.battle);
+    const battle = normalizeCustomMoveBattle(entry.battle, entry);
     return {
       index,
       source: { ...entry },
@@ -372,15 +387,19 @@ function normalizeMoveCategory(category) {
   return "physical";
 }
 
-function normalizeCustomMoveBattle(battle) {
-  const modifiers = Array.isArray(battle?.modifiers) && battle.modifiers.length
-    ? battle.modifiers.map((modifier, index) => normalizeCustomMoveModifier(modifier, index)).filter(Boolean)
-    : buildLegacyCustomMoveModifiers(battle);
+function normalizeCustomMoveBattle(battle, fallbackEntry = {}) {
+  const source = battle && typeof battle === "object" ? battle : {};
+  const sourceModifiers = Array.isArray(source.modifiers) && source.modifiers.length
+    ? source.modifiers
+    : (Array.isArray(fallbackEntry?.modifiers) ? fallbackEntry.modifiers : []);
+  const modifiers = sourceModifiers.length
+    ? sourceModifiers.map((modifier, index) => normalizeCustomMoveModifier(modifier, index)).filter(Boolean)
+    : buildLegacyCustomMoveModifiers(source);
   return {
-    accuracy: battle?.accuracy === "" || battle?.accuracy == null ? 100 : clamp(safeNumber(battle.accuracy) || 100, 1, 100),
-    pp: Math.max(1, safeNumber(battle?.pp) || 15),
-    priority: clamp(safeNumber(battle?.priority), -7, 7),
-    target: battle?.target === "user" ? "user" : "selected-pokemon",
+    accuracy: source.accuracy === "" || source.accuracy == null ? 100 : clamp(safeNumber(source.accuracy) || 100, 1, 100),
+    pp: Math.max(1, safeNumber(source.pp) || 15),
+    priority: clamp(safeNumber(source.priority), -7, 7),
+    target: normalizeMoveTarget(source.target),
     modifiers,
   };
 }
@@ -458,11 +477,11 @@ function buildLegacyCustomMoveModifiers(battle) {
 function normalizeCustomMoveModifier(modifier, index) {
   const type = CUSTOM_MOVE_MODIFIER_TYPES.some((option) => option.value === modifier?.type) ? modifier.type : "raise-stat";
   const chance = clamp(safeNumber(modifier?.chance) || 100, 1, 100);
-  const target = modifier?.target === "user" ? "user" : "target";
+  const target = normalizeEffectTarget(modifier?.target);
   const stat = BATTLE_STAGE_KEYS.includes(modifier?.stat) ? modifier.stat : "attack";
   const stages = clamp(Math.abs(safeNumber(modifier?.stages) || 1), 1, 6);
   const amount = clamp(Math.abs(safeNumber(modifier?.amount) || 25), 1, 100);
-  const status = CUSTOM_MOVE_STATUS_OPTIONS.some((option) => option.value === modifier?.status) ? modifier.status : "burn";
+  const status = normalizeCustomStatus(modifier?.status);
   return {
     id: modifier?.id || `modifier-${index}-${Math.random().toString(36).slice(2, 8)}`,
     type,
@@ -473,6 +492,26 @@ function normalizeCustomMoveModifier(modifier, index) {
     amount,
     status,
   };
+}
+
+function normalizeMoveTarget(target) {
+  return ["user", "self"].includes(cleanText(target).toLowerCase()) ? "user" : "selected-pokemon";
+}
+
+function normalizeEffectTarget(target) {
+  return ["user", "self"].includes(cleanText(target).toLowerCase()) ? "user" : "target";
+}
+
+function normalizeCustomStatus(status) {
+  const value = cleanText(status).toLowerCase();
+  if (["tox", "toxic", "bad-poison", "bad poison", "badly poisoned"].includes(value)) return "tox";
+  if (["poison", "psn", "poisoned"].includes(value)) return "poison";
+  if (["burn", "brn", "burned", "burnt"].includes(value)) return "burn";
+  if (["paralysis", "paralyze", "paralyzed", "par"].includes(value)) return "paralysis";
+  if (["sleep", "slp", "asleep"].includes(value)) return "sleep";
+  if (["freeze", "frozen", "frz"].includes(value)) return "freeze";
+  if (["confusion", "confused", "cfn"].includes(value)) return "confusion";
+  return "burn";
 }
 
 function rebuildCustomMoveState(rawMovedex) {
@@ -548,10 +587,26 @@ function handleRosterTabClick(event) {
   refreshShowdownPanel();
 }
 
-function handleSlotStripClick(event) {
-  const button = event.target.closest(".slot-tab[data-slot]");
+function handleBuilderTabClick(event) {
+  const button = event.target.closest(".segmented-button[data-builder-tab]");
   if (!button) return;
-  getActiveRoster().selectedSlot = Number(button.dataset.slot);
+  state.activeBuilderTab = button.dataset.builderTab === "creatures" ? "creatures" : "team";
+  renderBuilderTabs();
+  renderBuilderPanels();
+}
+
+function handleMainTabClick(event) {
+  const button = event.target.closest(".segmented-button[data-main-tab]");
+  if (!button) return;
+  state.activeMainTab = button.dataset.mainTab === "battle" ? "battle" : "builder";
+  renderMainTabs();
+  renderMainPanels();
+}
+
+function handleSlotStripClick(event) {
+  const target = event.target;
+  if (!target.matches(".slot-select")) return;
+  getActiveRoster().selectedSlot = Number(target.value) || 0;
   renderSelectedSlotStrip();
   renderTeamBuilder();
   renderDexDetail();
@@ -574,6 +629,9 @@ function handleTeamBuilderClick(event) {
     const slotIndex = Number(useSelected.dataset.slot);
     if (state.selectedSpeciesId) {
       assignSpeciesToSlot(state.activeRosterKey, slotIndex, state.selectedSpeciesId);
+      state.activeBuilderTab = "team";
+      renderBuilderTabs();
+      renderBuilderPanels();
       renderSelectedSlotStrip();
       renderTeamBuilder();
       renderDexDetail();
@@ -672,57 +730,11 @@ function handleTeamBuilderFocusOut(event) {
 }
 
 function handleMoveLabChange(event) {
-  const move = state.customMoveById.get(state.selectedCustomMoveId);
-  if (!move) return;
-  const target = event.target;
-
-  if (target.id === "custom-move-select") {
-    state.selectedCustomMoveId = target.value;
-    renderMoveLab();
-    return;
-  }
-
-  const field = target.dataset.moveLabField;
-  if (field) {
-    if (field === "target") move.battle.target = target.value === "user" ? "user" : "selected-pokemon";
-    else if (field === "priority") move.battle.priority = clamp(safeNumber(target.value), -7, 7);
-    else if (field === "pp") move.battle.pp = Math.max(1, safeNumber(target.value) || 15);
-    else if (field === "accuracy") move.battle.accuracy = clamp(safeNumber(target.value) || 100, 1, 100);
-    syncCustomMoves();
-    return;
-  }
-
-  const modifierRow = target.closest("[data-modifier]");
-  if (modifierRow) {
-    const modifier = move.battle.modifiers.find((entry) => entry.id === modifierRow.dataset.modifier);
-    if (!modifier) return;
-    const modifierField = target.dataset.modifierField;
-    if (modifierField === "chance") modifier.chance = clamp(safeNumber(target.value) || 100, 1, 100);
-    if (modifierField === "type") modifier.type = CUSTOM_MOVE_MODIFIER_TYPES.some((option) => option.value === target.value) ? target.value : "raise-stat";
-    if (modifierField === "target") modifier.target = target.value === "user" ? "user" : "target";
-    if (modifierField === "stat") modifier.stat = BATTLE_STAGE_KEYS.includes(target.value) ? target.value : "attack";
-    if (modifierField === "stages") modifier.stages = clamp(Math.abs(safeNumber(target.value) || 1), 1, 6);
-    if (modifierField === "status") modifier.status = CUSTOM_MOVE_STATUS_OPTIONS.some((option) => option.value === target.value) ? target.value : "burn";
-    if (modifierField === "amount") modifier.amount = clamp(Math.abs(safeNumber(target.value) || 25), 1, 100);
-    syncCustomMoves();
-  }
+  void event;
 }
 
 function handleMoveLabClick(event) {
-  const move = state.customMoveById.get(state.selectedCustomMoveId);
-  if (!move) return;
-
-  if (event.target.closest("[data-add-modifier]")) {
-    move.battle.modifiers.push(normalizeCustomMoveModifier({}, move.battle.modifiers.length));
-    syncCustomMoves();
-    return;
-  }
-
-  const removeModifier = event.target.closest("[data-remove-modifier]");
-  if (removeModifier) {
-    move.battle.modifiers = move.battle.modifiers.filter((entry) => entry.id !== removeModifier.dataset.removeModifier);
-    syncCustomMoves();
-  }
+  void event;
 }
 
 function handleDexListClick(event) {
@@ -738,6 +750,9 @@ function handleDexDetailClick(event) {
   if (assign && state.selectedSpeciesId) {
     const roster = getActiveRoster();
     assignSpeciesToSlot(state.activeRosterKey, roster.selectedSlot, state.selectedSpeciesId);
+    state.activeBuilderTab = "team";
+    renderBuilderTabs();
+    renderBuilderPanels();
     renderSelectedSlotStrip();
     renderTeamBuilder();
     renderDexDetail();
@@ -773,6 +788,44 @@ function renderRosterTabs() {
   dom.resetButton.textContent = state.activeRosterKey === "alpha" ? "Reset Team A" : "Clear Team B";
 }
 
+function renderMainTabs() {
+  dom.mainTabs.innerHTML = [
+    { key: "builder", title: "Builder", subtitle: "Teams, creatures, export" },
+    { key: "battle", title: "Battle", subtitle: "Arena and battle log" },
+  ].map((tab) => `
+    <button class="segmented-button${state.activeMainTab === tab.key ? " active" : ""}" data-main-tab="${tab.key}" type="button">
+      <strong>${escapeHtml(tab.title)}</strong>
+      <small>${escapeHtml(tab.subtitle)}</small>
+    </button>
+  `).join("");
+}
+
+function renderMainPanels() {
+  const showBuilder = state.activeMainTab === "builder";
+  if (dom.teamPanel) dom.teamPanel.classList.toggle("main-hidden", !showBuilder);
+  if (dom.dexPanel) dom.dexPanel.classList.toggle("main-hidden", !showBuilder);
+  if (dom.exportPanel) dom.exportPanel.classList.toggle("main-hidden", !showBuilder);
+  if (dom.builderTabs) dom.builderTabs.closest(".builder-tabs-panel")?.classList.toggle("main-hidden", !showBuilder);
+  if (dom.battlePanel) dom.battlePanel.classList.toggle("main-hidden", showBuilder);
+}
+
+function renderBuilderTabs() {
+  dom.builderTabs.innerHTML = [
+    { key: "team", title: "Team Slots", subtitle: "Edit one slot at a time" },
+    { key: "creatures", title: "Creatures", subtitle: "Browse the Dinodex" },
+  ].map((tab) => `
+    <button class="segmented-button${state.activeBuilderTab === tab.key ? " active" : ""}" data-builder-tab="${tab.key}" type="button">
+      <strong>${escapeHtml(tab.title)}</strong>
+      <small>${escapeHtml(tab.subtitle)}</small>
+    </button>
+  `).join("");
+}
+
+function renderBuilderPanels() {
+  if (dom.teamPanel) dom.teamPanel.classList.toggle("hidden-panel", state.activeBuilderTab !== "team");
+  if (dom.dexPanel) dom.dexPanel.classList.toggle("hidden-panel", state.activeBuilderTab !== "creatures");
+}
+
 function renderTypeFilter() {
   const options = ['<option value="all">All Types</option>'];
   state.availableTypes.forEach((type) => options.push(`<option value="${escapeAttribute(type)}">${escapeHtml(type)}</option>`));
@@ -784,21 +837,17 @@ function renderSelectedSlotStrip() {
   const roster = getActiveRoster();
   dom.selectedSlotStrip.innerHTML = roster.team.map((slot, index) => {
     const species = state.speciesById.get(slot.speciesId);
-    return `
-      <button class="slot-tab${index === roster.selectedSlot ? " active" : ""}" data-slot="${index}" type="button">
-        <strong>Slot ${index + 1}</strong>
-        <span>${escapeHtml(species?.displayName || "Empty")}</span>
-      </button>
-    `;
+    return `<option value="${index}"${index === roster.selectedSlot ? " selected" : ""}>Slot ${index + 1}: ${escapeHtml(species?.displayName || "Empty")}</option>`;
   }).join("");
 }
 
 function renderTeamBuilder() {
   const roster = getActiveRoster();
-  dom.teamBuilder.innerHTML = roster.team.map((slot, index) => {
-    const species = state.speciesById.get(slot.speciesId);
-    return `
-      <article class="team-slot${index === roster.selectedSlot ? " selected" : ""}" data-slot="${index}">
+  const index = roster.selectedSlot;
+  const slot = roster.team[index];
+  const species = state.speciesById.get(slot.speciesId);
+  dom.teamBuilder.innerHTML = `
+      <article class="team-slot selected" data-slot="${index}">
         <div class="team-slot-head">
           <div class="slot-portrait">${renderImageMarkup(species)}</div>
           <div class="slot-copy">
@@ -825,13 +874,13 @@ function renderTeamBuilder() {
             return `
               <label class="field">
                 <span>Move ${moveIndex + 1}</span>
-                <input class="move-input${invalid ? " invalid" : ""}" data-slot="${index}" data-move="${moveIndex}" type="text" list="move-options" value="${escapeAttribute(move)}" placeholder="Enter an official move">
+                <input class="move-input${invalid ? " invalid" : ""}" data-slot="${index}" data-move="${moveIndex}" type="text" list="move-options" value="${escapeAttribute(move)}" placeholder="Enter an official or Dinodex move">
               </label>
             `;
           }).join("")}
         </div>
 
-        <p class="move-help">Official moves always work. Custom moves also work here once they have battle settings in the Move Lab.</p>
+        <p class="move-help">Official moves and Dinodex moves from this save both work in the local battle sandbox.</p>
 
         <div class="meta-grid wide">
           <label class="field">
@@ -850,129 +899,6 @@ function renderTeamBuilder() {
 
         <p class="support-note">Held items are preserved in Showdown export. The battle sandbox applies common competitive item effects and leaves niche items cosmetic.</p>
       </article>
-    `;
-  }).join("");
-}
-
-function renderMoveLab() {
-  if (!state.sourceSave) {
-    dom.moveLab.innerHTML = '<div class="move-lab-empty">Load a Dinodex save to build battle-ready custom move effects.</div>';
-    return;
-  }
-
-  if (!state.customMoves.length) {
-    dom.moveLab.innerHTML = '<div class="move-lab-empty">This save does not have any custom moves yet.</div>';
-    return;
-  }
-
-  const move = state.customMoveById.get(state.selectedCustomMoveId) || state.customMoves[0];
-  if (!move) {
-    dom.moveLab.innerHTML = '<div class="move-lab-empty">No custom move is selected.</div>';
-    return;
-  }
-
-  dom.moveLab.innerHTML = `
-    <div class="move-lab-summary">
-      <label class="field">
-        <span>Custom Move</span>
-        <select id="custom-move-select">
-          ${state.customMoves.map((entry) => `<option value="${escapeAttribute(entry.id)}"${entry.id === move.id ? " selected" : ""}>${escapeHtml(entry.name)}</option>`).join("")}
-        </select>
-      </label>
-
-      <div class="move-lab-card">
-        <h3>${escapeHtml(move.name)}</h3>
-        <p class="small-copy">${escapeHtml(move.type)} | ${escapeHtml(move.category)} | ${escapeHtml(move.power ? `${move.power} BP` : "Status")}</p>
-        <p class="support-note">${escapeHtml(move.description || "No description on this custom move yet.")}</p>
-      </div>
-    </div>
-
-    <div class="meta-grid wide">
-      <label class="field">
-        <span>Target</span>
-        <select data-move-lab-field="target">
-          <option value="selected-pokemon"${move.battle.target === "selected-pokemon" ? " selected" : ""}>Target</option>
-          <option value="user"${move.battle.target === "user" ? " selected" : ""}>User</option>
-        </select>
-      </label>
-      <label class="field">
-        <span>Accuracy</span>
-        <input data-move-lab-field="accuracy" type="number" min="1" max="100" value="${escapeAttribute(String(move.battle.accuracy))}">
-      </label>
-      <label class="field">
-        <span>PP</span>
-        <input data-move-lab-field="pp" type="number" min="1" max="64" value="${escapeAttribute(String(move.battle.pp))}">
-      </label>
-      <label class="field">
-        <span>Priority</span>
-        <input data-move-lab-field="priority" type="number" min="-7" max="7" value="${escapeAttribute(String(move.battle.priority || 0))}">
-      </label>
-    </div>
-
-    <div class="move-lab-card">
-      <div class="modifier-actions">
-        <div>
-          <h4>Modifiers</h4>
-          <p class="support-note">Build things like “30% chance to lower Speed by 1 stage” or “50% chance to burn the target” from one row builder.</p>
-        </div>
-        <button class="ghost-button" type="button" data-add-modifier>Add Modifier</button>
-      </div>
-      <div class="modifier-list">
-        ${move.battle.modifiers.length ? move.battle.modifiers.map((modifier) => renderMoveModifierRow(modifier)).join("") : '<div class="move-lab-empty">No modifiers added yet.</div>'}
-      </div>
-    </div>
-  `;
-}
-
-function renderMoveModifierRow(modifier) {
-  const showStatFields = modifier.type === "raise-stat" || modifier.type === "lower-stat";
-  const showStatusField = modifier.type === "inflict-status";
-  const showAmountField = modifier.type === "heal" || modifier.type === "drain" || modifier.type === "recoil";
-  return `
-    <div class="modifier-row" data-modifier="${escapeAttribute(modifier.id)}">
-      <div class="modifier-actions">
-        <span class="modifier-badge">Modifier</span>
-        <button class="ghost-button" type="button" data-remove-modifier="${escapeAttribute(modifier.id)}">Remove</button>
-      </div>
-      <div class="modifier-grid">
-        <label class="field">
-          <span>Chance %</span>
-          <input data-modifier-field="chance" type="number" min="1" max="100" value="${escapeAttribute(String(modifier.chance))}">
-        </label>
-        <label class="field">
-          <span>Effect</span>
-          <select data-modifier-field="type">
-            ${CUSTOM_MOVE_MODIFIER_TYPES.map((option) => `<option value="${escapeAttribute(option.value)}"${modifier.type === option.value ? " selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}
-          </select>
-        </label>
-        <label class="field">
-          <span>Target</span>
-          <select data-modifier-field="target">
-            ${CUSTOM_MOVE_EFFECT_TARGETS.map((option) => `<option value="${escapeAttribute(option.value)}"${modifier.target === option.value ? " selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}
-          </select>
-        </label>
-        <label class="field${showStatFields ? "" : ' is-hidden'}">
-          <span>Stat</span>
-          <select data-modifier-field="stat">
-            ${BATTLE_STAGE_KEYS.map((stat) => `<option value="${escapeAttribute(stat)}"${modifier.stat === stat ? " selected" : ""}>${escapeHtml(STAT_LABELS[stat])}</option>`).join("")}
-          </select>
-        </label>
-        <label class="field${showStatFields ? "" : ' is-hidden'}">
-          <span>Stages</span>
-          <input data-modifier-field="stages" type="number" min="1" max="6" value="${escapeAttribute(String(modifier.stages))}">
-        </label>
-        <label class="field${showStatusField ? "" : ' is-hidden'}">
-          <span>Status</span>
-          <select data-modifier-field="status">
-            ${CUSTOM_MOVE_STATUS_OPTIONS.filter((option) => option.value).map((option) => `<option value="${escapeAttribute(option.value)}"${modifier.status === option.value ? " selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}
-          </select>
-        </label>
-        <label class="field${showAmountField ? "" : ' is-hidden'}">
-          <span>Amount %</span>
-          <input data-modifier-field="amount" type="number" min="1" max="100" value="${escapeAttribute(String(modifier.amount))}">
-        </label>
-      </div>
-    </div>
   `;
 }
 
@@ -1277,7 +1203,6 @@ function downloadUpdatedSave() {
 
   const updatedSave = JSON.parse(JSON.stringify(state.sourceSave));
   updatedSave.team = state.rosters.alpha.team.map((slot) => slotToSaveEntry(slot));
-  updatedSave.movedex = state.customMoves.map(exportCustomMove);
   const blob = new Blob([JSON.stringify(updatedSave, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
@@ -2223,7 +2148,6 @@ function syncCustomMoves(reRender = true) {
   state.sourceSave.movedex = state.customMoves.map(exportCustomMove);
   buildMoveLookup();
   seedMoveDatalist();
-  if (reRender) renderMoveLab();
   renderTeamBuilder();
   refreshShowdownPanel();
   renderBattle();

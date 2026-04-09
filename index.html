@@ -19,7 +19,7 @@
         <p class="hero-text">
           Load your Dinodex Studio save, build a Showdown-style roster with held items,
           then pit two six-slot teams against each other in a local battle sandbox.
-          Abilities are still intentionally skipped, and custom moves can be given battle-ready effects in the Move Lab.
+          Abilities are still intentionally skipped, and Dinodex moves now use the battle settings already stored in the save.
         </p>
       </div>
 
@@ -43,7 +43,15 @@
     </header>
 
     <main class="workspace">
-      <section class="panel team-panel">
+      <section class="panel main-tabs-panel">
+        <div id="main-tabs" class="segmented-control" aria-label="Workspace tabs"></div>
+      </section>
+
+      <section class="panel builder-tabs-panel">
+        <div id="builder-tabs" class="segmented-control" aria-label="Builder tabs"></div>
+      </section>
+
+      <section id="team-panel" class="panel team-panel">
         <div class="panel-head with-controls">
           <div>
             <p class="section-kicker">Roster Builder</p>
@@ -59,12 +67,17 @@
           </div>
         </div>
 
-        <p class="panel-note">Team A round-trips to your save. Team B stays local for battle testing.</p>
-        <div id="selected-slot-strip" class="selected-slot-strip"></div>
+        <div class="builder-topline">
+          <p class="panel-note left-note">Team A round-trips to your save. Team B stays local for battle testing.</p>
+          <label class="field builder-slot-picker">
+            <span>Selected Slot</span>
+            <select id="selected-slot-select" class="slot-select"></select>
+          </label>
+        </div>
         <div id="team-builder" class="team-builder"></div>
       </section>
 
-      <section class="panel dex-panel">
+      <section id="dex-panel" class="panel dex-panel">
         <div class="panel-head with-controls">
           <div>
             <p class="section-kicker">Custom Dex</p>
@@ -92,20 +105,7 @@
         </div>
       </section>
 
-      <section class="panel move-lab-panel">
-        <div class="panel-head with-controls">
-          <div>
-            <p class="section-kicker">Custom Move Lab</p>
-            <h2>Build Move Effects</h2>
-          </div>
-        </div>
-
-        <p class="panel-note left-note">Pick a custom Dinodex move, then build battle effects with buttons instead of hand-writing metadata.</p>
-
-        <div id="move-lab" class="move-lab"></div>
-      </section>
-
-      <section class="panel battle-panel">
+      <section id="battle-panel" class="panel battle-panel">
         <div class="panel-head with-controls">
           <div>
             <p class="section-kicker">Battle Arena</p>
@@ -143,7 +143,7 @@
         </div>
       </section>
 
-      <section class="panel export-panel">
+      <section id="export-panel" class="panel export-panel">
         <div class="panel-head with-controls">
           <div>
             <p class="section-kicker">Showdown Import</p>
@@ -170,7 +170,7 @@
     </main>
 
     <footer class="footnote">
-      <p>Battle notes: this local simulator handles HP, damage, items, status, recoil, recovery, and stat-stage changes, but still skips abilities and some niche move edge cases.</p>
+      <p>Battle notes: this local simulator handles HP, damage, items, status, Dinodex move modifiers, recoil, recovery, and stat-stage changes, but still skips abilities and some niche edge cases.</p>
     </footer>
   </div>
 
