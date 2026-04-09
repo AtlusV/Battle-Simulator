@@ -188,6 +188,7 @@ button {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+  align-items: stretch;
 }
 
 .action-cluster.compact {
@@ -363,6 +364,10 @@ button {
   border: 1px solid rgba(var(--accent-rgb), 0.22);
 }
 
+.is-hidden {
+  display: none;
+}
+
 .field {
   display: grid;
   gap: 8px;
@@ -379,10 +384,12 @@ input[type="number"],
 select,
 textarea {
   width: 100%;
+  max-width: 100%;
   border-radius: var(--radius-md);
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: rgba(255, 255, 255, 0.05);
   padding: 0.88rem 0.95rem;
+  font-size: 16px;
   transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
 }
 
@@ -910,6 +917,16 @@ textarea {
   align-content: start;
 }
 
+.battle-side,
+.battle-center,
+.dex-panel,
+.team-panel,
+.battle-panel,
+.export-panel,
+.move-lab-panel {
+  min-width: 0;
+}
+
 .battle-log-card {
   min-height: 100%;
 }
@@ -983,6 +1000,7 @@ textarea {
     grid-template-columns: 1fr;
     grid-template-areas:
       "team"
+      "moves"
       "dex"
       "battle"
       "export";
@@ -999,6 +1017,35 @@ textarea {
   }
 }
 
+@media (max-width: 1040px) {
+  .move-lab-summary,
+  .dex-layout,
+  .battle-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .battle-center {
+    order: 3;
+  }
+
+  .battle-side {
+    order: 1;
+  }
+
+  .battle-side:last-child {
+    order: 2;
+  }
+
+  .selected-slot-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .move-grid,
+  .meta-grid.wide {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 780px) {
   .app-shell {
     width: min(100vw - 18px, 100%);
@@ -1007,6 +1054,7 @@ textarea {
 
   .masthead,
   .team-panel,
+  .move-lab-panel,
   .dex-panel,
   .battle-panel,
   .export-panel {
@@ -1017,6 +1065,12 @@ textarea {
   .battle-topline,
   .panel-actions {
     gap: 12px;
+  }
+
+  .panel-actions,
+  .action-cluster,
+  .action-cluster.compact {
+    justify-content: stretch;
   }
 
   .selected-slot-strip,
@@ -1034,8 +1088,41 @@ textarea {
     align-items: stretch;
   }
 
+  .status-pill {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .segmented-control {
+    display: grid;
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  .segmented-button,
+  .button,
+  .ghost-button {
+    width: 100%;
+  }
+
   .panel-note {
     text-align: left;
+  }
+
+  .slot-actions,
+  .detail-actions,
+  .modifier-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .battle-side-head,
+  .stat-card header,
+  .battle-move-header,
+  .battle-switch-top,
+  .hp-meta {
+    flex-wrap: wrap;
+    align-items: flex-start;
   }
 
   .dex-card,
@@ -1051,5 +1138,73 @@ textarea {
   .slot-portrait {
     width: 72px;
     height: 72px;
+  }
+
+  textarea {
+    min-height: 220px;
+  }
+}
+
+@media (max-width: 560px) {
+  .app-shell {
+    width: min(100vw - 12px, 100%);
+  }
+
+  .masthead,
+  .team-panel,
+  .move-lab-panel,
+  .dex-panel,
+  .battle-panel,
+  .export-panel {
+    padding: 14px;
+    border-radius: 22px;
+  }
+
+  .masthead h1 {
+    font-size: clamp(1.9rem, 11vw, 2.8rem);
+    max-width: none;
+  }
+
+  .selected-slot-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .team-slot,
+  .dex-detail,
+  .battle-active-card,
+  .battle-center-card,
+  .battle-panel-block,
+  .stat-card {
+    padding: 12px;
+  }
+
+  .team-slot-head,
+  .dex-card,
+  .reserve-card {
+    grid-template-columns: 1fr;
+  }
+
+  .team-slot-head {
+    justify-items: start;
+  }
+
+  .slot-portrait,
+  .dex-thumb,
+  .preview-art {
+    width: 100%;
+    max-width: 92px;
+    height: auto;
+    aspect-ratio: 1;
+  }
+
+  .battle-card-title {
+    font-size: 1.1rem;
+  }
+
+  .type-chip,
+  .boost-chip,
+  .team-badge,
+  .status-chip {
+    font-size: 0.74rem;
   }
 }

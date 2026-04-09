@@ -59,6 +59,16 @@ const CUSTOM_MOVE_EFFECT_TARGETS = [
   { value: "user", label: "User" },
 ];
 
+const CUSTOM_MOVE_MODIFIER_TYPES = [
+  { value: "raise-stat", label: "Raise Stat" },
+  { value: "lower-stat", label: "Lower Stat" },
+  { value: "inflict-status", label: "Inflict Status" },
+  { value: "flinch", label: "Flinch" },
+  { value: "heal", label: "Heal" },
+  { value: "drain", label: "Drain" },
+  { value: "recoil", label: "Recoil" },
+];
+
 const CUSTOM_MOVE_STATUS_OPTIONS = [
   { value: "", label: "None" },
   { value: "burn", label: "Burn" },
@@ -363,36 +373,106 @@ function normalizeMoveCategory(category) {
 }
 
 function normalizeCustomMoveBattle(battle) {
-  const statModifiers = Array.isArray(battle?.statModifiers) ? battle.statModifiers.map((modifier, index) => normalizeStatModifier(modifier, index)).filter(Boolean) : [];
-  const ailmentEffects = Array.isArray(battle?.ailmentEffects) ? battle.ailmentEffects.map((effect, index) => normalizeAilmentEffect(effect, index)).filter(Boolean) : [];
+  const modifiers = Array.isArray(battle?.modifiers) && battle.modifiers.length
+    ? battle.modifiers.map((modifier, index) => normalizeCustomMoveModifier(modifier, index)).filter(Boolean)
+    : buildLegacyCustomMoveModifiers(battle);
   return {
     accuracy: battle?.accuracy === "" || battle?.accuracy == null ? 100 : clamp(safeNumber(battle.accuracy) || 100, 1, 100),
     pp: Math.max(1, safeNumber(battle?.pp) || 15),
     priority: clamp(safeNumber(battle?.priority), -7, 7),
     target: battle?.target === "user" ? "user" : "selected-pokemon",
-    flinchChance: clamp(safeNumber(battle?.flinchChance), 0, 100),
-    healing: clamp(safeNumber(battle?.healing), 0, 100),
-    drain: clamp(safeNumber(battle?.drain), -100, 100),
-    statModifiers,
-    ailmentEffects,
+    modifiers,
   };
 }
 
-function normalizeStatModifier(modifier, index) {
-  const stat = BATTLE_STAGE_KEYS.includes(modifier?.stat) ? modifier.stat : "attack";
-  const direction = modifier?.direction === "lower" ? "lower" : "raise";
-  const stages = clamp(Math.abs(safeNumber(modifier?.stages) || 1), 1, 6);
-  const chance = clamp(safeNumber(modifier?.chance) || 100, 1, 100);
-  const target = modifier?.target === "user" ? "user" : "target";
-  return { id: modifier?.id || `stat-${Date.now()}-${index}`, stat, direction, stages, chance, target };
+function buildLegacyCustomMoveModifiers(battle) {
+  const modifiers = [];
+  const statModifiers = Array.isArray(battle?.statModifiers) ? battle.statModifiers : [];
+  const ailmentEffects = Array.isArray(battle?.ailmentEffects) ? battle.ailmentEffects : [];
+
+  statModifiers.forEach((modifier, index) => {
+    const normalized = normalizeCustomMoveModifier({
+      id: modifier?.id || `legacy-stat-${index}`,
+      type: modifier?.direction === "lower" ? "lower-stat" : "raise-stat",
+      chance: modifier?.chance,
+      target: modifier?.target,
+      stat: modifier?.stat,
+      stages: modifier?.stages,
+    }, index);
+    if (normalized) modifiers.push(normalized);
+  });
+
+  ailmentEffects.forEach((effect, index) => {
+    const normalized = normalizeCustomMoveModifier({
+      id: effect?.id || `legacy-ailment-${index}`,
+      type: effect?.ailment === "flinch" ? "flinch" : "inflict-status",
+      chance: effect?.chance,
+      target: effect?.target,
+      status: effect?.ailment,
+    }, index + modifiers.length);
+    if (normalized) modifiers.push(normalized);
+  });
+
+  if (safeNumber(battle?.flinchChance) > 0) {
+    modifiers.push(normalizeCustomMoveModifier({
+      id: "legacy-flinch",
+      type: "flinch",
+      chance: battle.flinchChance,
+      target: "target",
+    }, modifiers.length));
+  }
+
+  if (safeNumber(battle?.healing) > 0) {
+    modifiers.push(normalizeCustomMoveModifier({
+      id: "legacy-heal",
+      type: "heal",
+      chance: 100,
+      target: "user",
+      amount: battle.healing,
+    }, modifiers.length));
+  }
+
+  if (safeNumber(battle?.drain) > 0) {
+    modifiers.push(normalizeCustomMoveModifier({
+      id: "legacy-drain",
+      type: "drain",
+      chance: 100,
+      target: "user",
+      amount: battle.drain,
+    }, modifiers.length));
+  }
+
+  if (safeNumber(battle?.drain) < 0) {
+    modifiers.push(normalizeCustomMoveModifier({
+      id: "legacy-recoil",
+      type: "recoil",
+      chance: 100,
+      target: "user",
+      amount: Math.abs(safeNumber(battle.drain)),
+    }, modifiers.length));
+  }
+
+  return modifiers.filter(Boolean);
 }
 
-function normalizeAilmentEffect(effect, index) {
-  const ailment = CUSTOM_MOVE_STATUS_OPTIONS.some((option) => option.value === effect?.ailment) ? effect.ailment : "";
-  if (!ailment) return null;
-  const chance = clamp(safeNumber(effect?.chance) || 100, 1, 100);
-  const target = effect?.target === "user" ? "user" : "target";
-  return { id: effect?.id || `ailment-${Date.now()}-${index}`, ailment, chance, target };
+function normalizeCustomMoveModifier(modifier, index) {
+  const type = CUSTOM_MOVE_MODIFIER_TYPES.some((option) => option.value === modifier?.type) ? modifier.type : "raise-stat";
+  const chance = clamp(safeNumber(modifier?.chance) || 100, 1, 100);
+  const target = modifier?.target === "user" ? "user" : "target";
+  const stat = BATTLE_STAGE_KEYS.includes(modifier?.stat) ? modifier.stat : "attack";
+  const stages = clamp(Math.abs(safeNumber(modifier?.stages) || 1), 1, 6);
+  const amount = clamp(Math.abs(safeNumber(modifier?.amount) || 25), 1, 100);
+  const status = CUSTOM_MOVE_STATUS_OPTIONS.some((option) => option.value === modifier?.status) ? modifier.status : "burn";
+  return {
+    id: modifier?.id || `modifier-${index}-${Math.random().toString(36).slice(2, 8)}`,
+    type,
+    chance,
+    target,
+    stat,
+    stages,
+    amount,
+    status,
+  };
 }
 
 function rebuildCustomMoveState(rawMovedex) {
@@ -608,36 +688,23 @@ function handleMoveLabChange(event) {
     else if (field === "priority") move.battle.priority = clamp(safeNumber(target.value), -7, 7);
     else if (field === "pp") move.battle.pp = Math.max(1, safeNumber(target.value) || 15);
     else if (field === "accuracy") move.battle.accuracy = clamp(safeNumber(target.value) || 100, 1, 100);
-    else if (field === "flinchChance") move.battle.flinchChance = clamp(safeNumber(target.value), 0, 100);
-    else if (field === "healing") move.battle.healing = clamp(safeNumber(target.value), 0, 100);
-    else if (field === "drain") move.battle.drain = clamp(safeNumber(target.value), -100, 100);
     syncCustomMoves();
     return;
   }
 
-  const statRow = target.closest("[data-stat-modifier]");
-  if (statRow) {
-    const modifier = move.battle.statModifiers.find((entry) => entry.id === statRow.dataset.statModifier);
+  const modifierRow = target.closest("[data-modifier]");
+  if (modifierRow) {
+    const modifier = move.battle.modifiers.find((entry) => entry.id === modifierRow.dataset.modifier);
     if (!modifier) return;
-    const statField = target.dataset.statField;
-    if (statField === "chance") modifier.chance = clamp(safeNumber(target.value) || 100, 1, 100);
-    if (statField === "target") modifier.target = target.value === "user" ? "user" : "target";
-    if (statField === "direction") modifier.direction = target.value === "lower" ? "lower" : "raise";
-    if (statField === "stat") modifier.stat = BATTLE_STAGE_KEYS.includes(target.value) ? target.value : "attack";
-    if (statField === "stages") modifier.stages = clamp(Math.abs(safeNumber(target.value) || 1), 1, 6);
-    syncCustomMoves(false);
-    return;
-  }
-
-  const ailmentRow = target.closest("[data-ailment-effect]");
-  if (ailmentRow) {
-    const effect = move.battle.ailmentEffects.find((entry) => entry.id === ailmentRow.dataset.ailmentEffect);
-    if (!effect) return;
-    const ailmentField = target.dataset.ailmentField;
-    if (ailmentField === "chance") effect.chance = clamp(safeNumber(target.value) || 100, 1, 100);
-    if (ailmentField === "target") effect.target = target.value === "user" ? "user" : "target";
-    if (ailmentField === "ailment") effect.ailment = target.value;
-    syncCustomMoves(false);
+    const modifierField = target.dataset.modifierField;
+    if (modifierField === "chance") modifier.chance = clamp(safeNumber(target.value) || 100, 1, 100);
+    if (modifierField === "type") modifier.type = CUSTOM_MOVE_MODIFIER_TYPES.some((option) => option.value === target.value) ? target.value : "raise-stat";
+    if (modifierField === "target") modifier.target = target.value === "user" ? "user" : "target";
+    if (modifierField === "stat") modifier.stat = BATTLE_STAGE_KEYS.includes(target.value) ? target.value : "attack";
+    if (modifierField === "stages") modifier.stages = clamp(Math.abs(safeNumber(target.value) || 1), 1, 6);
+    if (modifierField === "status") modifier.status = CUSTOM_MOVE_STATUS_OPTIONS.some((option) => option.value === target.value) ? target.value : "burn";
+    if (modifierField === "amount") modifier.amount = clamp(Math.abs(safeNumber(target.value) || 25), 1, 100);
+    syncCustomMoves();
   }
 }
 
@@ -645,28 +712,15 @@ function handleMoveLabClick(event) {
   const move = state.customMoveById.get(state.selectedCustomMoveId);
   if (!move) return;
 
-  if (event.target.closest("[data-add-stat-modifier]")) {
-    move.battle.statModifiers.push(normalizeStatModifier({}, move.battle.statModifiers.length));
+  if (event.target.closest("[data-add-modifier]")) {
+    move.battle.modifiers.push(normalizeCustomMoveModifier({}, move.battle.modifiers.length));
     syncCustomMoves();
     return;
   }
 
-  if (event.target.closest("[data-add-ailment-effect]")) {
-    move.battle.ailmentEffects.push(normalizeAilmentEffect({ ailment: "burn" }, move.battle.ailmentEffects.length));
-    syncCustomMoves();
-    return;
-  }
-
-  const removeStat = event.target.closest("[data-remove-stat-modifier]");
-  if (removeStat) {
-    move.battle.statModifiers = move.battle.statModifiers.filter((entry) => entry.id !== removeStat.dataset.removeStatModifier);
-    syncCustomMoves();
-    return;
-  }
-
-  const removeAilment = event.target.closest("[data-remove-ailment-effect]");
-  if (removeAilment) {
-    move.battle.ailmentEffects = move.battle.ailmentEffects.filter((entry) => entry.id !== removeAilment.dataset.removeAilmentEffect);
+  const removeModifier = event.target.closest("[data-remove-modifier]");
+  if (removeModifier) {
+    move.battle.modifiers = move.battle.modifiers.filter((entry) => entry.id !== removeModifier.dataset.removeModifier);
     syncCustomMoves();
   }
 }
@@ -853,111 +907,69 @@ function renderMoveLab() {
         <span>Priority</span>
         <input data-move-lab-field="priority" type="number" min="-7" max="7" value="${escapeAttribute(String(move.battle.priority || 0))}">
       </label>
-      <label class="field">
-        <span>Flinch %</span>
-        <input data-move-lab-field="flinchChance" type="number" min="0" max="100" value="${escapeAttribute(String(move.battle.flinchChance || 0))}">
-      </label>
-      <label class="field">
-        <span>Healing %</span>
-        <input data-move-lab-field="healing" type="number" min="0" max="100" value="${escapeAttribute(String(move.battle.healing || 0))}">
-      </label>
-      <label class="field">
-        <span>Drain / Recoil %</span>
-        <input data-move-lab-field="drain" type="number" min="-100" max="100" value="${escapeAttribute(String(move.battle.drain || 0))}">
-      </label>
     </div>
 
     <div class="move-lab-card">
       <div class="modifier-actions">
         <div>
-          <h4>Stat Modifiers</h4>
-          <p class="support-note">Build things like “30% chance to lower Speed by 1” or “100% chance to raise User Attack by 2”.</p>
+          <h4>Modifiers</h4>
+          <p class="support-note">Build things like “30% chance to lower Speed by 1 stage” or “50% chance to burn the target” from one row builder.</p>
         </div>
-        <button class="ghost-button" type="button" data-add-stat-modifier>Add Stat Modifier</button>
+        <button class="ghost-button" type="button" data-add-modifier>Add Modifier</button>
       </div>
       <div class="modifier-list">
-        ${move.battle.statModifiers.length ? move.battle.statModifiers.map((modifier) => renderStatModifierRow(modifier)).join("") : '<div class="move-lab-empty">No stat modifiers added yet.</div>'}
-      </div>
-    </div>
-
-    <div class="move-lab-card">
-      <div class="modifier-actions">
-        <div>
-          <h4>Status Effects</h4>
-          <p class="support-note">Optional quick builder for burn, poison, paralysis, sleep, freeze, confusion, or bad poison.</p>
-        </div>
-        <button class="ghost-button" type="button" data-add-ailment-effect>Add Status Effect</button>
-      </div>
-      <div class="modifier-list">
-        ${move.battle.ailmentEffects.length ? move.battle.ailmentEffects.map((effect) => renderAilmentEffectRow(effect)).join("") : '<div class="move-lab-empty">No status effects added yet.</div>'}
+        ${move.battle.modifiers.length ? move.battle.modifiers.map((modifier) => renderMoveModifierRow(modifier)).join("") : '<div class="move-lab-empty">No modifiers added yet.</div>'}
       </div>
     </div>
   `;
 }
 
-function renderStatModifierRow(modifier) {
+function renderMoveModifierRow(modifier) {
+  const showStatFields = modifier.type === "raise-stat" || modifier.type === "lower-stat";
+  const showStatusField = modifier.type === "inflict-status";
+  const showAmountField = modifier.type === "heal" || modifier.type === "drain" || modifier.type === "recoil";
   return `
-    <div class="modifier-row" data-stat-modifier="${escapeAttribute(modifier.id)}">
+    <div class="modifier-row" data-modifier="${escapeAttribute(modifier.id)}">
       <div class="modifier-actions">
-        <span class="modifier-badge">Stat Modifier</span>
-        <button class="ghost-button" type="button" data-remove-stat-modifier="${escapeAttribute(modifier.id)}">Remove</button>
+        <span class="modifier-badge">Modifier</span>
+        <button class="ghost-button" type="button" data-remove-modifier="${escapeAttribute(modifier.id)}">Remove</button>
       </div>
       <div class="modifier-grid">
         <label class="field">
           <span>Chance %</span>
-          <input data-stat-field="chance" type="number" min="1" max="100" value="${escapeAttribute(String(modifier.chance))}">
+          <input data-modifier-field="chance" type="number" min="1" max="100" value="${escapeAttribute(String(modifier.chance))}">
+        </label>
+        <label class="field">
+          <span>Effect</span>
+          <select data-modifier-field="type">
+            ${CUSTOM_MOVE_MODIFIER_TYPES.map((option) => `<option value="${escapeAttribute(option.value)}"${modifier.type === option.value ? " selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}
+          </select>
         </label>
         <label class="field">
           <span>Target</span>
-          <select data-stat-field="target">
+          <select data-modifier-field="target">
             ${CUSTOM_MOVE_EFFECT_TARGETS.map((option) => `<option value="${escapeAttribute(option.value)}"${modifier.target === option.value ? " selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}
           </select>
         </label>
-        <label class="field">
-          <span>Raise / Lower</span>
-          <select data-stat-field="direction">
-            <option value="raise"${modifier.direction === "raise" ? " selected" : ""}>Raise</option>
-            <option value="lower"${modifier.direction === "lower" ? " selected" : ""}>Lower</option>
-          </select>
-        </label>
-        <label class="field">
+        <label class="field${showStatFields ? "" : ' is-hidden'}">
           <span>Stat</span>
-          <select data-stat-field="stat">
+          <select data-modifier-field="stat">
             ${BATTLE_STAGE_KEYS.map((stat) => `<option value="${escapeAttribute(stat)}"${modifier.stat === stat ? " selected" : ""}>${escapeHtml(STAT_LABELS[stat])}</option>`).join("")}
           </select>
         </label>
-        <label class="field">
+        <label class="field${showStatFields ? "" : ' is-hidden'}">
           <span>Stages</span>
-          <input data-stat-field="stages" type="number" min="1" max="6" value="${escapeAttribute(String(modifier.stages))}">
+          <input data-modifier-field="stages" type="number" min="1" max="6" value="${escapeAttribute(String(modifier.stages))}">
         </label>
-      </div>
-    </div>
-  `;
-}
-
-function renderAilmentEffectRow(effect) {
-  return `
-    <div class="modifier-row" data-ailment-effect="${escapeAttribute(effect.id)}">
-      <div class="modifier-actions">
-        <span class="modifier-badge">Status Effect</span>
-        <button class="ghost-button" type="button" data-remove-ailment-effect="${escapeAttribute(effect.id)}">Remove</button>
-      </div>
-      <div class="modifier-grid">
-        <label class="field">
-          <span>Chance %</span>
-          <input data-ailment-field="chance" type="number" min="1" max="100" value="${escapeAttribute(String(effect.chance))}">
-        </label>
-        <label class="field">
-          <span>Target</span>
-          <select data-ailment-field="target">
-            ${CUSTOM_MOVE_EFFECT_TARGETS.map((option) => `<option value="${escapeAttribute(option.value)}"${effect.target === option.value ? " selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}
-          </select>
-        </label>
-        <label class="field">
+        <label class="field${showStatusField ? "" : ' is-hidden'}">
           <span>Status</span>
-          <select data-ailment-field="ailment">
-            ${CUSTOM_MOVE_STATUS_OPTIONS.filter((option) => option.value).map((option) => `<option value="${escapeAttribute(option.value)}"${effect.ailment === option.value ? " selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}
+          <select data-modifier-field="status">
+            ${CUSTOM_MOVE_STATUS_OPTIONS.filter((option) => option.value).map((option) => `<option value="${escapeAttribute(option.value)}"${modifier.status === option.value ? " selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}
           </select>
+        </label>
+        <label class="field${showAmountField ? "" : ' is-hidden'}">
+          <span>Amount %</span>
+          <input data-modifier-field="amount" type="number" min="1" max="100" value="${escapeAttribute(String(modifier.amount))}">
         </label>
       </div>
     </div>
@@ -1716,9 +1728,6 @@ function performMove(sideKey, moveIndex) {
     appendBattleLog(moveSlot.name, `cleared ${recipient.displayName}'s stat changes.`);
   }
 
-  applyMoveBoostEffects(user, recipient, move);
-  applyMoveAilmentEffects(user, recipient, move);
-
   if (move.healing > 0) {
     const healed = healCombatant(user, Math.floor((move.healing / 100) * user.maxHp));
     if (healed > 0) appendBattleLog(user.displayName, `restored ${healed} HP.`);
@@ -1748,19 +1757,12 @@ function performMove(sideKey, moveIndex) {
   if (SELF_DESTRUCT_MOVES.has(move.id) && !user.fainted) {
     applyDirectDamage(user, user.hp, moveSlot.name);
   }
+  applyCustomMoveModifiers(user, recipient, move, totalDamage, targetIsOpponent);
+  applyMoveBoostEffects(user, recipient, move);
+  applyMoveAilmentEffects(user, recipient, move);
 }
 
 function applyMoveBoostEffects(user, recipient, move) {
-  if (Array.isArray(move.modifiers) && move.modifiers.length) {
-    move.modifiers.forEach((modifier) => {
-      const chance = clamp(safeNumber(modifier.chance) || 100, 1, 100);
-      if (Math.random() * 100 >= chance) return;
-      const target = resolveMoveEffectTarget(user, recipient, modifier.target);
-      if (!target || !modifier.boosts?.length) return;
-      applyBoostChanges(target, modifier.boosts);
-      appendBattleLog(target.displayName, describeBoostChanges(modifier.boosts));
-    });
-  }
   if (!move.boosts?.length) return;
   const chance = getBoostEffectChance(move);
   if (chance <= 0 || Math.random() * 100 >= chance) return;
@@ -1772,25 +1774,6 @@ function applyMoveBoostEffects(user, recipient, move) {
 }
 
 function applyMoveAilmentEffects(user, recipient, move) {
-  if (Array.isArray(move.ailmentEffects) && move.ailmentEffects.length) {
-    move.ailmentEffects.forEach((effect) => {
-      const chance = clamp(safeNumber(effect.chance) || 100, 1, 100);
-      if (Math.random() * 100 >= chance) return;
-      const target = resolveMoveEffectTarget(user, recipient, effect.target);
-      if (!target || !effect.ailment) return;
-      if (effect.ailment === "tox") {
-        if (inflictMajorStatus(target, "tox")) appendBattleLog(target.displayName, "was badly poisoned.");
-        return;
-      }
-      if (effect.ailment === "confusion") {
-        if (inflictConfusion(target, {})) appendBattleLog(target.displayName, "became confused.");
-        return;
-      }
-      if (["burn", "poison", "paralysis", "sleep", "freeze"].includes(effect.ailment)) {
-        if (inflictMajorStatus(target, effect.ailment, {})) appendBattleLog(target.displayName, describeStatusInfliction(effect.ailment));
-      }
-    });
-  }
   if (!move.ailment || move.ailment === "none" || move.ailment === "unknown") return;
   const chance = getAilmentEffectChance(move);
   if (chance <= 0 || Math.random() * 100 >= chance) return;
@@ -1815,6 +1798,65 @@ function applyMoveAilmentEffects(user, recipient, move) {
 
 function resolveMoveEffectTarget(user, recipient, targetMode) {
   return targetMode === "user" ? user : recipient;
+}
+
+function applyCustomMoveModifiers(user, recipient, move, totalDamage, targetIsOpponent) {
+  if (!Array.isArray(move.modifiers) || !move.modifiers.length) return;
+  move.modifiers.forEach((modifier) => {
+    const chance = clamp(safeNumber(modifier.chance) || 100, 1, 100);
+    if (Math.random() * 100 >= chance) return;
+    const target = resolveMoveEffectTarget(user, recipient, modifier.target);
+    if (!target) return;
+
+    if ((modifier.type === "raise-stat" || modifier.type === "lower-stat") && modifier.boosts?.length) {
+      applyBoostChanges(target, modifier.boosts);
+      appendBattleLog(target.displayName, describeBoostChanges(modifier.boosts));
+      return;
+    }
+
+    if (modifier.type === "inflict-status") {
+      if (modifier.status === "tox") {
+        if (inflictMajorStatus(target, "tox")) appendBattleLog(target.displayName, "was badly poisoned.");
+        return;
+      }
+      if (modifier.status === "confusion") {
+        if (inflictConfusion(target, {})) appendBattleLog(target.displayName, "became confused.");
+        return;
+      }
+      if (["burn", "poison", "paralysis", "sleep", "freeze"].includes(modifier.status)) {
+        if (inflictMajorStatus(target, modifier.status, {})) appendBattleLog(target.displayName, describeStatusInfliction(modifier.status));
+      }
+      return;
+    }
+
+    if (modifier.type === "flinch") {
+      if (targetIsOpponent && totalDamage > 0 && !target.fainted) {
+        target.flinched = true;
+        appendBattleLog(target.displayName, "flinched.");
+      }
+      return;
+    }
+
+    if (modifier.type === "heal") {
+      const healed = healCombatant(target, Math.floor((Math.max(1, modifier.amount || 0) / 100) * target.maxHp));
+      if (healed > 0) appendBattleLog(target.displayName, `restored ${healed} HP.`);
+      return;
+    }
+
+    if (modifier.type === "drain") {
+      if (totalDamage > 0) {
+        const healed = healCombatant(user, Math.max(1, Math.floor((totalDamage * Math.max(1, modifier.amount || 0)) / 100)));
+        if (healed > 0) appendBattleLog(user.displayName, `drained ${healed} HP.`);
+      }
+      return;
+    }
+
+    if (modifier.type === "recoil") {
+      if (totalDamage > 0 && !user.fainted) {
+        applyDirectDamage(user, Math.max(1, Math.floor((totalDamage * Math.max(1, modifier.amount || 0)) / 100)), `${move.name} recoil`);
+      }
+    }
+  });
 }
 
 function calculateMoveDamage(user, target, move, precomputedMultiplier) {
@@ -2134,18 +2176,17 @@ function buildBattleMoveFromCustom(move) {
     priority: move.battle.priority || 0,
     damageClass: move.category,
     target: move.battle.target || "selected-pokemon",
-    flinchChance: move.battle.flinchChance || 0,
-    healing: move.battle.healing || 0,
-    drain: move.battle.drain || 0,
-    modifiers: move.battle.statModifiers.map((modifier) => ({
+    modifiers: move.battle.modifiers.map((modifier) => ({
+      type: modifier.type,
       chance: modifier.chance,
       target: modifier.target,
-      boosts: [{ stat: modifier.stat, change: modifier.direction === "lower" ? -modifier.stages : modifier.stages }],
-    })),
-    ailmentEffects: move.battle.ailmentEffects.map((effect) => ({
-      ailment: effect.ailment,
-      chance: effect.chance,
-      target: effect.target,
+      stat: modifier.stat,
+      stages: modifier.stages,
+      amount: modifier.amount,
+      status: modifier.status,
+      boosts: modifier.type === "raise-stat" || modifier.type === "lower-stat"
+        ? [{ stat: modifier.stat, change: modifier.type === "lower-stat" ? -modifier.stages : modifier.stages }]
+        : [],
     })),
   };
 }
@@ -2164,22 +2205,15 @@ function exportCustomMove(move) {
       pp: move.battle.pp,
       priority: move.battle.priority,
       target: move.battle.target,
-      flinchChance: move.battle.flinchChance,
-      healing: move.battle.healing,
-      drain: move.battle.drain,
-      statModifiers: move.battle.statModifiers.map((modifier) => ({
+      modifiers: move.battle.modifiers.map((modifier) => ({
         id: modifier.id,
+        type: modifier.type,
         chance: modifier.chance,
         target: modifier.target,
-        direction: modifier.direction,
         stat: modifier.stat,
         stages: modifier.stages,
-      })),
-      ailmentEffects: move.battle.ailmentEffects.map((effect) => ({
-        id: effect.id,
-        chance: effect.chance,
-        target: effect.target,
-        ailment: effect.ailment,
+        amount: modifier.amount,
+        status: modifier.status,
       })),
     },
   };
