@@ -720,6 +720,10 @@ textarea {
   background: linear-gradient(90deg, rgba(var(--accent-rgb), 0.46), rgba(var(--accent-rgb), 0.96));
 }
 
+.hp-fill {
+  transition: width 620ms cubic-bezier(0.22, 1, 0.36, 1), background 200ms ease;
+}
+
 .hp-fill.good {
   background: linear-gradient(90deg, rgba(142, 255, 167, 0.56), rgba(142, 255, 167, 1));
 }

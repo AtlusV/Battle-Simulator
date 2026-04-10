@@ -15,7 +15,7 @@ This is a no-build browser app for Dinodex Studio saves. It reads your custom de
 
 ## Current rules
 
-- Abilities are intentionally skipped for now
+- Abilities are supported in the local battle sim, including switch triggers, stat-drop reactions, terrain/weather hooks, end-of-turn passives, and several common KO-trigger effects
 - Custom moves can be given battle-ready effects in the Move Lab
 - The move picker includes official moves plus your configured custom moves
 - The battle simulator supports common battle effects, but not every niche cartridge or Showdown edge case yet

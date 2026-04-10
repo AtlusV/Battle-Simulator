@@ -21,6 +21,16 @@ const SELF_DESTRUCT_MOVES = new Set(["explosion", "self-destruct", "memento", "m
 const CLEAR_ALL_BOOST_MOVES = new Set(["haze"]);
 const CLEAR_TARGET_BOOST_MOVES = new Set(["clear-smog"]);
 const FORCE_SWITCH_MOVES = new Set(["roar", "whirlwind", "dragon-tail", "circle-throw"]);
+const HAZARD_MOVES = new Set(["stealth-rock", "spikes", "toxic-spikes", "sticky-web"]);
+const SOUND_MOVE_KEYWORDS = ["voice", "song", "sound", "noise", "clang", "screech", "snarl", "roar", "hypervoice", "echoedvoice", "boomburst"];
+const BALL_BOMB_MOVE_KEYWORDS = ["ball", "bomb", "seed", "sphere", "egg", "pollen"];
+const UNSWAPPABLE_ABILITIES = new Set([
+  "multitype", "rkssystem", "schooling", "comatose", "disguise", "iceface", "powerconstruct", "battlebond",
+  "zenmode", "shieldsdown", "forecast", "illusion", "trace", "imposter", "stancechange",
+]);
+const STANCE_CHANGE_MOVES = new Set([
+  "kings-shield", "sacred-sword", "shadow-sneak", "iron-head", "flash-cannon", "shadow-ball", "close-combat",
+]);
 
 const TYPE_BOOST_ITEMS = {
   "Silk Scarf": "Normal", Charcoal: "Fire", "Mystic Water": "Water", Magnet: "Electric", "Miracle Seed": "Grass",
@@ -53,6 +63,34 @@ const FIXED_DAMAGE_MOVES = {
 const MAJOR_STATUS_LABELS = {
   burn: "BRN", poison: "PSN", tox: "TOX", paralysis: "PAR", sleep: "SLP", freeze: "FRZ", confusion: "CFN",
 };
+
+const MOLD_BREAKER_ABILITIES = new Set(["moldbreaker", "turboblaze", "teravolt"]);
+const STAT_DROP_BLOCK_ABILITIES = new Set(["clearbody", "whitesmoke", "fullmetalbody"]);
+const IGNORABLE_DEFENDER_ABILITIES = new Set([
+  "levitate", "flashfire", "waterabsorb", "dryskin", "stormdrain", "watercompaction", "voltabsorb",
+  "lightningrod", "motordrive", "sapsipper", "eartheater", "wellbakedbody", "wonderguard",
+  "thickfat", "heatproof", "multiscale", "shadowshield", "filter", "solidrock", "prismarmor",
+  "furcoat", "icescales", "fluffy", "waterbubble", "waterveil", "limber", "immunity", "pastelveil",
+  "insomnia", "vitalspirit", "sweetveil", "magmaarmor", "owntempo", "purifyingsalt", "comatose",
+  "static", "flamebody", "poisonpoint", "roughskin", "ironbarbs", "effectspore", "gooey", "tanglinghair",
+]);
+const CONTACT_HINT_KEYWORDS = [
+  "punch", "kick", "tackle", "slam", "head", "horn", "claw", "scratch", "whip", "tail", "bite",
+  "fang", "jab", "chop", "cut", "crush", "stomp", "smash", "bash", "grip", "wrap", "bind", "throw",
+  "rush", "charge", "tackle", "attack",
+];
+const NON_CONTACT_HINT_KEYWORDS = [
+  "beam", "blast", "wave", "shot", "cannon", "gun", "bomb", "missile", "leaf", "spore", "powder",
+  "ray", "pulse", "wind", "storm", "sound", "noise", "song", "dance",
+];
+const NON_CONTACT_MOVE_IDS = new Set([
+  "earthquake", "rockslide", "rockblast", "bonemerang", "bulldoze", "iciclespear", "bulletseed", "pinmissile",
+  "stoneaxe", "stoneshard", "bonerush", "dragondarts", "populationbomb", "barrage",
+]);
+const HEALING_MOVE_IDS = new Set([
+  "recover", "roost", "softboiled", "slackoff", "synthesis", "moonlight", "morningsun", "shoreup",
+  "healorder", "milkdrink", "wish", "junglehealing", "lifedew", "floralhealing",
+]);
 
 const CUSTOM_MOVE_EFFECT_TARGETS = [
   { value: "target", label: "Target" },
@@ -100,6 +138,8 @@ const state = {
   selectedSpeciesId: "",
   customMoves: [],
   customMoveById: new Map(),
+  customAbilities: [],
+  customAbilityById: new Map(),
   selectedCustomMoveId: "",
   searchTerm: "",
   typeFilter: "all",
@@ -244,6 +284,7 @@ function loadSave(fileText, fileName) {
   state.sourceSave = parsed;
   state.loadedFileName = fileName;
   rebuildCustomMoveState(parsed.movedex);
+  rebuildCustomAbilityState(parsed.abilitydex);
   buildMoveLookup();
   seedMoveDatalist();
   state.speciesList = buildSpeciesList(parsed.pokedex);
@@ -288,7 +329,7 @@ function loadSave(fileText, fileName) {
 }
 
 function buildSpeciesList(rawPokedex) {
-  return rawPokedex.filter((entry) => toId(entry?.name) !== "globidens").map((entry) => {
+  return rawPokedex.map((entry) => {
     const baseName = cleanText(entry.name);
     const form = cleanText(entry.form) || "Base";
     const customFormName = cleanText(entry.customFormName);
@@ -520,6 +561,42 @@ function rebuildCustomMoveState(rawMovedex) {
   if (!state.customMoveById.has(state.selectedCustomMoveId)) {
     state.selectedCustomMoveId = state.customMoves[0]?.id || "";
   }
+}
+
+function normalizeAbilityModifier(modifier, index) {
+  return {
+    id: String(modifier?.id || `ability-modifier-${index}-${Math.random().toString(36).slice(2, 8)}`),
+    chance: clamp(safeNumber(modifier?.chance) || 100, 1, 100),
+    event: cleanText(modifier?.event) || "switch-in",
+    action: cleanText(modifier?.action) || "raise-stat",
+    target: cleanText(modifier?.target) || "self",
+    stat: cleanText(modifier?.stat).toLowerCase() || "attack",
+    stages: clamp(safeNumber(modifier?.stages) || 1, 1, 6),
+    amount: clamp(safeNumber(modifier?.amount) || 25, 1, 100),
+    status: normalizeCustomStatus(modifier?.status),
+    type: cleanType(modifier?.type) || "Normal",
+    weather: cleanText(modifier?.weather).toLowerCase() || "sun",
+    terrain: cleanText(modifier?.terrain).toLowerCase() || "electric",
+    moveCategory: normalizeMoveCategory(modifier?.moveCategory),
+    priority: String(modifier?.priority || "1"),
+    targeting: cleanText(modifier?.targeting) || "normal",
+  };
+}
+
+function buildCustomAbilityList(rawAbilitydex) {
+  if (!Array.isArray(rawAbilitydex)) return [];
+  return rawAbilitydex.map((entry, index) => ({
+    index,
+    id: toId(entry?.name || `custom-ability-${index}`),
+    name: cleanText(entry?.name),
+    description: cleanText(entry?.description),
+    modifiers: Array.isArray(entry?.modifiers) ? entry.modifiers.map((modifier, modifierIndex) => normalizeAbilityModifier(modifier, modifierIndex)).filter(Boolean) : [],
+  })).filter((ability) => ability.name);
+}
+
+function rebuildCustomAbilityState(rawAbilitydex) {
+  state.customAbilities = buildCustomAbilityList(rawAbilitydex);
+  state.customAbilityById = new Map(state.customAbilities.map((ability) => [ability.id, ability]));
 }
 
 function buildTeamFromSave(rawTeam) {
@@ -855,6 +932,7 @@ function renderTeamBuilder() {
             <h3 class="slot-title">${escapeHtml(species?.displayName || "Open Slot")}</h3>
             <p class="slot-subtitle">${escapeHtml(species ? species.showdownName : "Choose a species from the custom dex")}</p>
             <div class="battle-meta-row"><span class="team-badge${roster.isPrimary ? "" : " secondary"}">${escapeHtml(roster.isPrimary ? "Save-backed roster" : "Battle-only roster")}</span></div>
+            <p class="small-copy">${escapeHtml(species?.ability ? `Ability: ${species.ability}` : "Ability: none listed")}</p>
           </div>
         </div>
 
@@ -970,7 +1048,7 @@ function renderDexDetail() {
       </div>
       <div class="stat-card">
         <header><strong>Abilities</strong><span>Deferred</span></header>
-        <p>${escapeHtml(species.ability || "No ability listed. This builder currently skips abilities.")}</p>
+        <p>${escapeHtml(species.ability || "No ability listed for this creature.")}</p>
       </div>
     </div>
   `;
@@ -1240,13 +1318,13 @@ function startBattle() {
   }
 
   state.battle = {
+    ...createEmptyBattleState(),
     started: true,
-    turn: 0,
-    winner: "",
     teams: { alpha: alphaTeam, beta: betaTeam },
-    pendingActions: { alpha: null, beta: null },
     log: [{ title: "Battle started", text: `${alphaTeam.label} and ${betaTeam.label} entered the arena.`, turnMarker: false }],
   };
+  applySwitchInAbilities("alpha", "lead");
+  applySwitchInAbilities("beta", "lead");
   renderBattle();
   setStatus("Started a local battle between Team A and Team B.");
 }
@@ -1304,7 +1382,11 @@ function renderBattle() {
   dom.battleStatus.textContent = battle.winner
     ? (battle.winner === "draw" ? "The battle ended in a draw." : `${battle.teams[battle.winner].label} won the battle.`)
     : "Choose one action for each side, then resolve the turn.";
-  dom.battleTurn.textContent = `Turn ${battle.turn}`;
+  const fieldState = [
+    battle.weather && `Weather: ${normalizeWeatherLabel(battle.weather)}`,
+    battle.terrain && `Terrain: ${normalizeTerrainLabel(battle.terrain)}`,
+  ].filter(Boolean).join(" | ");
+  dom.battleTurn.textContent = fieldState ? `Turn ${battle.turn} | ${fieldState}` : `Turn ${battle.turn}`;
   dom.battlePending.innerHTML = renderPendingActions();
   dom.battleLog.innerHTML = battle.log.map((entry) => `
     <div class="battle-log-entry${entry.turnMarker ? " turn" : ""}">
@@ -1380,7 +1462,7 @@ function renderBattleSide(sideKey) {
       <div class="battle-art">${renderBattleImage(active)}</div>
       <div>
         <h3 class="battle-card-title">${escapeHtml(active.displayName)}</h3>
-        <p class="battle-card-subtitle">Level ${escapeHtml(String(active.level))}${active.item ? ` | ${escapeHtml(getBattleItemLabel(active))}` : ""}</p>
+        <p class="battle-card-subtitle">Level ${escapeHtml(String(active.level))}${active.item ? ` | ${escapeHtml(getBattleItemLabel(active))}` : ""}${active.ability ? ` | ${escapeHtml(active.ability)}` : ""}</p>
         <div class="chip-row">${active.types.map(renderTypeChip).join("")}</div>
         <div class="battle-meta-row">${renderStatusChips(active)}</div>
       </div>
@@ -1437,12 +1519,17 @@ function buildCombatant(slot, rosterSlot) {
     rosterSlot,
     speciesId: species.id,
     displayName: species.displayName,
+    baseDisplayName: species.displayName,
     showdownName: species.showdownName,
+    ability: cleanText(species.ability),
+    originalAbility: cleanText(species.ability),
     types: species.types.length ? species.types : ["Normal"],
+    originalTypes: [...(species.types.length ? species.types : ["Normal"])],
     level,
     hp: stats.hp,
     maxHp: stats.hp,
     stats,
+    originalStats: { ...stats },
     boosts: createBoostState(),
     status: "",
     statusTurns: 0,
@@ -1457,7 +1544,21 @@ function buildCombatant(slot, rosterSlot) {
     airBalloonPopped: false,
     choiceLock: "",
     lastMoveUsed: "",
+    flashFireBoost: false,
+    truantLoafing: false,
+    transformed: false,
+    stolenItemThisTurn: false,
+    disguiseBroken: false,
+    iceFaceBroken: false,
+    berserkTriggered: false,
+    disabledMove: "",
+    disabledTurns: 0,
+    perishCount: 0,
+    originalSpeciesId: species.id,
+    originalShowdownName: species.showdownName,
+    currentForm: species.form || "Base",
     moves,
+    originalMoves: moves.map((moveSlotData) => ({ ...moveSlotData })),
   };
 }
 
@@ -1471,12 +1572,21 @@ function canSelectBattleMove(sideKey, moveIndex) {
   if (isChoiceItem(mon.item) && mon.choiceLock && mon.choiceLock !== moveSlot.name) {
     return { ok: false, message: `${mon.displayName} is locked into ${mon.choiceLock}.` };
   }
+  if (abilityId(mon) === "gorillatactics" && mon.choiceLock && mon.choiceLock !== moveSlot.name) {
+    return { ok: false, message: `${mon.displayName} is locked into ${mon.choiceLock}.` };
+  }
   const move = getBattleMove(moveSlot.name);
   if (cleanText(mon.item) === "Assault Vest" && move?.damageClass === "status") {
     return { ok: false, message: "Assault Vest blocks status moves." };
   }
   if (move?.id === "fake-out" && !mon.fresh) {
     return { ok: false, message: "Fake Out only works on the first turn this battler is active." };
+  }
+  if (abilityId(mon) === "truant" && mon.truantLoafing) {
+    return { ok: false, message: `${mon.displayName} is loafing around because of Truant.` };
+  }
+  if (mon.disabledMove && mon.disabledMove === moveSlot.name) {
+    return { ok: false, message: `${moveSlot.name} is disabled.` };
   }
   return { ok: true, message: "" };
 }
@@ -1503,12 +1613,13 @@ function buildActionOrder() {
     const move = getBattleMove(moveSlot?.name);
     const quickClaw = cleanText(user.item) === "Quick Claw" && !user.itemConsumed && Math.random() < 0.2;
     if (quickClaw) appendBattleLog(user.displayName, "Quick Claw let it act first.");
+    const priorityBonus = getAbilityPriorityBonus(user, move);
     return {
       sideKey,
       type: "move",
       moveIndex: action.moveIndex,
       actionRank: 1,
-      priority: (move?.priority || 0) + (quickClaw ? 0.5 : 0),
+      priority: (move?.priority || 0) + priorityBonus + (quickClaw ? 0.5 : 0),
       speed: getModifiedBattleStat(user, "speed"),
     };
   }).filter(Boolean).sort((left, right) => {
@@ -1533,7 +1644,11 @@ function performSwitch(sideKey, toIndex, mode) {
   const incoming = team?.combatants[toIndex];
   if (!incoming || incoming.fainted || team.active === toIndex) return;
   if (current) {
+    applySwitchOutAbilities(current);
+    restoreCombatantForm(current);
     current.choiceLock = "";
+    current.disabledMove = "";
+    current.disabledTurns = 0;
     current.protecting = false;
     current.flinched = false;
   }
@@ -1541,7 +1656,12 @@ function performSwitch(sideKey, toIndex, mode) {
   incoming.protecting = false;
   incoming.flinched = false;
   incoming.fresh = true;
+  incoming.stolenItemThisTurn = false;
+  refreshBattleFormState(incoming);
   appendBattleLog(team.label, mode === "manual" ? `switched to ${incoming.displayName}.` : `sent out ${incoming.displayName}.`);
+  applyEntryHazards(sideKey);
+  if (incoming.fainted) return;
+  applySwitchInAbilities(sideKey, mode);
 }
 
 function performMove(sideKey, moveIndex) {
@@ -1555,18 +1675,33 @@ function performMove(sideKey, moveIndex) {
   }
 
   const moveSlot = user.moves[moveIndex];
-  const move = getBattleMove(moveSlot.name);
+  const baseMove = getBattleMove(moveSlot.name);
+  const move = baseMove ? { ...baseMove } : null;
   if (!move) {
     appendBattleLog(user.displayName, `${moveSlot.name} has no battle data and fizzled out.`);
+    return;
+  }
+  if (abilityId(user) === "truant" && user.truantLoafing) {
+    user.truantLoafing = false;
+    appendBattleLog(user.displayName, "is loafing around.");
     return;
   }
 
   user.fresh = false;
   user.protecting = false;
+  user.stolenItemThisTurn = false;
   moveSlot.pp = Math.max(0, moveSlot.pp - 1);
   user.lastMoveUsed = moveSlot.name;
-  if (isChoiceItem(user.item) && !user.choiceLock) user.choiceLock = moveSlot.name;
-  appendBattleLog(user.displayName, `used ${moveSlot.name}.`);
+  if ((isChoiceItem(user.item) || abilityId(user) === "gorillatactics") && !user.choiceLock) user.choiceLock = moveSlot.name;
+  move.originalType = move.type;
+  move.type = getMoveTypeForUse(user, move);
+  applyStanceChange(user, move);
+  if (["protean", "libero"].includes(abilityId(user)) && move.type) {
+    user.types = [move.type];
+    appendBattleLog(user.displayName, `changed type to ${move.type} with ${user.ability}.`);
+  }
+  const moveLabel = getDisplayedMoveName(user, moveSlot, move);
+  appendBattleLog(user.displayName, `used ${moveLabel}.`);
 
   if (CLEAR_ALL_BOOST_MOVES.has(move.id)) {
     resetBoosts(getActiveCombatant("alpha"));
@@ -1596,8 +1731,8 @@ function performMove(sideKey, moveIndex) {
       return;
     }
     applyDirectDamage(user, Math.floor(user.maxHp / 2), `${moveSlot.name} recoil`);
-    applyBoostChanges(user, [{ stat: "attack", change: 6 }]);
-    appendBattleLog(user.displayName, "maxed out its Attack.");
+    const applied = applyBoostChanges(user, [{ stat: "attack", change: 6 }]);
+    if (applied.length) appendBattleLog(user.displayName, "maxed out its Attack.");
     return;
   }
 
@@ -1605,6 +1740,18 @@ function performMove(sideKey, moveIndex) {
   const recipient = targetIsOpponent ? target : user;
   if (!recipient) {
     appendBattleLog(moveSlot.name, "failed because there was no target.");
+    return;
+  }
+  if (targetIsOpponent && abilityId(recipient) === "pressure") {
+    moveSlot.pp = Math.max(0, moveSlot.pp - 1);
+  }
+  const effectivePriority = (move.priority || 0) + getAbilityPriorityBonus(user, move);
+  if (HAZARD_MOVES.has(move.id) && targetIsOpponent) {
+    const hazardTarget = abilityId(recipient) === "magicbounce" ? sideKey : otherSideKey(sideKey);
+    if (hazardTarget === sideKey) appendBattleLog(recipient.displayName, "reflected the hazard with Magic Bounce.");
+    if (placeHazard(hazardTarget, move.id)) appendBattleLog(moveLabel, "set an entry hazard.");
+    else appendBattleLog(moveLabel, "failed because that hazard is already maxed out.");
+    if (abilityId(user) === "truant") user.truantLoafing = true;
     return;
   }
   if ((move.category === "field-effect" || move.category === "whole-field-effect") && move.power <= 0) {
@@ -1615,16 +1762,45 @@ function performMove(sideKey, moveIndex) {
     appendBattleLog(recipient.displayName, "blocked the attack with Protect.");
     return;
   }
+  if (targetIsOpponent && getActiveTerrain() === "psychic" && effectivePriority > 0 && isGrounded(recipient)) {
+    appendBattleLog(recipient.displayName, "was protected by Psychic Terrain.");
+    if (abilityId(user) === "truant") user.truantLoafing = true;
+    return;
+  }
+  if (targetIsOpponent && effectivePriority > 0 && ["dazzling", "queenlymajesty", "armortail"].includes(abilityId(recipient))) {
+    appendBattleLog(recipient.displayName, `${recipient.ability} blocked the priority move.`);
+    if (abilityId(user) === "truant") user.truantLoafing = true;
+    return;
+  }
+  if (targetIsOpponent && abilityId(user) === "prankster" && move.damageClass === "status" && recipient.types.includes("Dark")) {
+    appendBattleLog(recipient.displayName, "ignored the Prankster-boosted status move.");
+    return;
+  }
+  if (targetIsOpponent && move.damageClass === "status" && abilityId(recipient) === "magicbounce") {
+    appendBattleLog(recipient.displayName, "reflected the status move with Magic Bounce.");
+    applyReflectedStatusMove(user, recipient, move);
+    return;
+  }
+  if (targetIsOpponent && handleAbilityMoveImmunity(user, recipient, move)) {
+    if (abilityId(user) === "truant") user.truantLoafing = true;
+    return;
+  }
   if (targetIsOpponent && getTypeMultiplier(move.type, recipient.types, recipient) === 0) {
     appendBattleLog(recipient.displayName, `is unaffected by ${moveSlot.name}.`);
+    if (abilityId(user) === "truant") user.truantLoafing = true;
     return;
   }
 
   const block = resolveBeforeMoveStatus(user, move);
   if (block.blocked) return;
 
+  if (move.id === "transform") {
+    transformCombatant(user, recipient, "Transform");
+    return;
+  }
   if (!moveHitsTarget(user, recipient, move, targetIsOpponent)) {
     appendBattleLog(moveSlot.name, "missed.");
+    if (abilityId(user) === "truant") user.truantLoafing = true;
     return;
   }
 
@@ -1648,6 +1824,11 @@ function performMove(sideKey, moveIndex) {
     if (move.minHits && move.maxHits && move.maxHits > 1) appendBattleLog(moveSlot.name, `hit ${getDisplayedHitCount(move)} time(s).`);
   }
 
+  if (targetIsOpponent && totalDamage > 0 && !recipient.fainted) {
+    applyDamageTakenAbilityEffects(user, recipient, move, totalDamage);
+    applyItemTheftAbilities(user, recipient, move, totalDamage);
+  }
+
   if (CLEAR_TARGET_BOOST_MOVES.has(move.id) && targetIsOpponent && !recipient.fainted) {
     resetBoosts(recipient);
     appendBattleLog(moveSlot.name, `cleared ${recipient.displayName}'s stat changes.`);
@@ -1665,7 +1846,8 @@ function performMove(sideKey, moveIndex) {
     const recoil = Math.max(1, Math.floor((totalDamage * Math.abs(move.drain)) / 100));
     applyDirectDamage(user, recoil, `${moveSlot.name} recoil`);
   }
-  if (targetIsOpponent && totalDamage > 0 && move.flinchChance > 0 && !recipient.fainted && Math.random() * 100 < move.flinchChance) {
+  const flinchChance = abilityId(user) === "serenegrace" ? move.flinchChance * 2 : move.flinchChance;
+  if (targetIsOpponent && totalDamage > 0 && move.flinchChance > 0 && abilityId(user) !== "sheerforce" && !recipient.fainted && Math.random() * 100 < flinchChance) {
     recipient.flinched = true;
     appendBattleLog(recipient.displayName, "flinched.");
   }
@@ -1685,39 +1867,42 @@ function performMove(sideKey, moveIndex) {
   applyCustomMoveModifiers(user, recipient, move, totalDamage, targetIsOpponent);
   applyMoveBoostEffects(user, recipient, move);
   applyMoveAilmentEffects(user, recipient, move);
+  if (abilityId(user) === "truant") user.truantLoafing = true;
 }
 
 function applyMoveBoostEffects(user, recipient, move) {
   if (!move.boosts?.length) return;
-  const chance = getBoostEffectChance(move);
+  if (abilityId(user) === "sheerforce") return;
+  const chance = getBoostEffectChance(move, user);
   if (chance <= 0 || Math.random() * 100 >= chance) return;
   const appliesToSelf = move.damageClass === "status" ? SELF_TARGETS.has(move.target) : move.category === "damage-raise";
   const target = appliesToSelf ? user : recipient;
   if (!target) return;
-  applyBoostChanges(target, move.boosts);
-  appendBattleLog(target.displayName, describeBoostChanges(move.boosts));
+  const applied = applyBoostChanges(target, move.boosts, target === user ? null : user);
+  if (applied.length) appendBattleLog(target.displayName, describeBoostChanges(applied));
 }
 
 function applyMoveAilmentEffects(user, recipient, move) {
   if (!move.ailment || move.ailment === "none" || move.ailment === "unknown") return;
-  const chance = getAilmentEffectChance(move);
+  if (abilityId(user) === "sheerforce") return;
+  const chance = getAilmentEffectChance(move, user);
   if (chance <= 0 || Math.random() * 100 >= chance) return;
   const appliesToSelf = move.damageClass === "status" && SELF_TARGETS.has(move.target);
   const target = appliesToSelf ? user : recipient;
   if (!target) return;
 
   if (move.id === "toxic") {
-    if (inflictMajorStatus(target, "tox")) appendBattleLog(target.displayName, "was badly poisoned.");
+    if (inflictMajorStatus(target, "tox", { source: user })) appendBattleLog(target.displayName, "was badly poisoned.");
     return;
   }
 
   if (move.ailment === "confusion") {
-    if (inflictConfusion(target, move)) appendBattleLog(target.displayName, "became confused.");
+    if (inflictConfusion(target, { ...move, source: user })) appendBattleLog(target.displayName, "became confused.");
     return;
   }
 
   if (["burn", "poison", "paralysis", "sleep", "freeze"].includes(move.ailment)) {
-    if (inflictMajorStatus(target, move.ailment, move)) appendBattleLog(target.displayName, describeStatusInfliction(move.ailment));
+    if (inflictMajorStatus(target, move.ailment, { ...move, source: user })) appendBattleLog(target.displayName, describeStatusInfliction(move.ailment));
   }
 }
 
@@ -1727,6 +1912,7 @@ function resolveMoveEffectTarget(user, recipient, targetMode) {
 
 function applyCustomMoveModifiers(user, recipient, move, totalDamage, targetIsOpponent) {
   if (!Array.isArray(move.modifiers) || !move.modifiers.length) return;
+  if (abilityId(user) === "sheerforce") return;
   move.modifiers.forEach((modifier) => {
     const chance = clamp(safeNumber(modifier.chance) || 100, 1, 100);
     if (Math.random() * 100 >= chance) return;
@@ -1734,22 +1920,22 @@ function applyCustomMoveModifiers(user, recipient, move, totalDamage, targetIsOp
     if (!target) return;
 
     if ((modifier.type === "raise-stat" || modifier.type === "lower-stat") && modifier.boosts?.length) {
-      applyBoostChanges(target, modifier.boosts);
-      appendBattleLog(target.displayName, describeBoostChanges(modifier.boosts));
+      const applied = applyBoostChanges(target, modifier.boosts, target === user ? null : user);
+      if (applied.length) appendBattleLog(target.displayName, describeBoostChanges(applied));
       return;
     }
 
     if (modifier.type === "inflict-status") {
       if (modifier.status === "tox") {
-        if (inflictMajorStatus(target, "tox")) appendBattleLog(target.displayName, "was badly poisoned.");
+        if (inflictMajorStatus(target, "tox", { source: user })) appendBattleLog(target.displayName, "was badly poisoned.");
         return;
       }
       if (modifier.status === "confusion") {
-        if (inflictConfusion(target, {})) appendBattleLog(target.displayName, "became confused.");
+        if (inflictConfusion(target, { source: user })) appendBattleLog(target.displayName, "became confused.");
         return;
       }
       if (["burn", "poison", "paralysis", "sleep", "freeze"].includes(modifier.status)) {
-        if (inflictMajorStatus(target, modifier.status, {})) appendBattleLog(target.displayName, describeStatusInfliction(modifier.status));
+        if (inflictMajorStatus(target, modifier.status, { source: user })) appendBattleLog(target.displayName, describeStatusInfliction(modifier.status));
       }
       return;
     }
@@ -1800,16 +1986,22 @@ function calculateMoveDamage(user, target, move, precomputedMultiplier) {
 
   const attackKey = move.damageClass === "physical" ? "attack" : "spattack";
   const defenseKey = move.damageClass === "physical" ? "defense" : "spdefense";
-  const attack = Math.max(1, getModifiedBattleStat(user, attackKey, move));
-  const defense = Math.max(1, getModifiedBattleStat(target, defenseKey, move));
+  const attackStage = hasActiveAbility(target, "unaware", user) ? 0 : (user.boosts[attackKey] || 0);
+  const defenseStage = hasActiveAbility(user, "unaware", target) ? 0 : (target.boosts[defenseKey] || 0);
+  const attack = Math.max(1, getModifiedBattleStatWithStage(user, attackKey, attackStage, move));
+  const defense = Math.max(1, getModifiedBattleStatWithStage(target, defenseKey, defenseStage, move));
   const levelFactor = Math.floor((2 * user.level) / 5) + 2;
-  const baseDamage = Math.floor(Math.floor((levelFactor * move.power * attack) / defense) / 50) + 2;
+  const adjustedPower = Math.floor(getModifiedMovePower(user, target, move) * getMovePowerAbilityModifier(user, move));
+  const baseDamage = Math.floor(Math.floor((levelFactor * adjustedPower * attack) / defense) / 50) + 2;
   const crit = Math.random() < getCritChance(move, user);
-  const stab = user.types.includes(move.type) ? 1.5 : 1;
+  const stab = user.types.includes(move.type) ? getStabModifier(user) : 1;
   const randomFactor = 0.85 + Math.random() * 0.15;
   let modifier = randomFactor * stab * typeMultiplier * getDamageItemModifier(user, move, typeMultiplier);
-  if (crit) modifier *= 1.5;
-  if (move.damageClass === "physical" && user.status === "burn") modifier *= 0.5;
+  modifier *= getWeatherPowerModifier(move);
+  modifier *= getOffensiveAbilityModifier(user, target, move, typeMultiplier);
+  modifier *= getDefensiveAbilityModifier(user, target, move, typeMultiplier);
+  if (crit) modifier *= abilityId(user) === "sniper" ? 2 : 1.5;
+  if (move.damageClass === "physical" && user.status === "burn" && abilityId(user) !== "guts") modifier *= 0.5;
   return {
     damage: Math.max(1, Math.floor(baseDamage * modifier)),
     crit,
@@ -1821,6 +2013,20 @@ function calculateMoveDamage(user, target, move, precomputedMultiplier) {
 function applyBattleDamage(target, damage, context) {
   let actual = Math.max(0, Math.floor(damage));
   if (actual <= 0) return 0;
+  if (!target.disguiseBroken && abilityId(target) === "disguise" && context.move.damageClass !== "status") {
+    target.disguiseBroken = true;
+    appendBattleLog(target.displayName, "broke its Disguise.");
+    return 0;
+  }
+  if (!target.iceFaceBroken && abilityId(target) === "iceface" && context.move.damageClass === "physical") {
+    target.iceFaceBroken = true;
+    appendBattleLog(target.displayName, "absorbed the hit with Ice Face.");
+    return 0;
+  }
+  if (target.hp === target.maxHp && hasActiveAbility(target, "sturdy", context.attacker) && actual >= target.hp) {
+    actual = Math.max(0, target.hp - 1);
+    appendBattleLog(target.displayName, "held on with Sturdy.");
+  }
   if (target.hp === target.maxHp && cleanText(target.item) === "Focus Sash" && !target.itemConsumed && actual >= target.hp) {
     target.itemConsumed = true;
     actual = Math.max(0, target.hp - 1);
@@ -1834,12 +2040,13 @@ function applyBattleDamage(target, damage, context) {
   applyThresholdItem(target);
   if (context.typeMultiplier > 1 && cleanText(target.item) === "Weakness Policy" && !target.itemConsumed && !target.fainted) {
     target.itemConsumed = true;
-    applyBoostChanges(target, [{ stat: "attack", change: 2 }, { stat: "spattack", change: 2 }]);
+    applyBoostChanges(target, [{ stat: "attack", change: 2 }, { stat: "spattack", change: 2 }], null);
     appendBattleLog(target.displayName, "activated Weakness Policy.");
   }
   if (cleanText(target.item) === "Rocky Helmet" && !target.itemConsumed && context.move.damageClass === "physical" && !context.attacker.fainted) {
     applyDirectDamage(context.attacker, Math.max(1, Math.floor(context.attacker.maxHp / 6)), "Rocky Helmet");
   }
+  applyContactAbilityEffects(context.attacker, target, context.move);
   if (target.hp <= 0) {
     target.hp = 0;
     target.fainted = true;
@@ -1847,6 +2054,8 @@ function applyBattleDamage(target, damage, context) {
     target.flinched = false;
     target.protecting = false;
     appendBattleLog(target.displayName, "fainted.");
+    applyAftermathAbility(context.attacker, target, context.move);
+    triggerFaintAbilities(target, context);
   }
   return actual;
 }
@@ -1864,6 +2073,7 @@ function applyDirectDamage(mon, amount, sourceLabel) {
     mon.protecting = false;
     mon.flinched = false;
     appendBattleLog(mon.displayName, "fainted.");
+    triggerFaintAbilities(mon, { sourceLabel });
   }
   return actual;
 }
@@ -1922,11 +2132,77 @@ function applyEndOfTurnEffects() {
     if (!mon || mon.fainted) return;
     mon.protecting = false;
     mon.flinched = false;
-    if (mon.status === "burn") applyDirectDamage(mon, Math.max(1, Math.floor(mon.maxHp / 16)), "Burn");
-    else if (mon.status === "poison") applyDirectDamage(mon, Math.max(1, Math.floor(mon.maxHp / 8)), "Poison");
-    else if (mon.status === "tox") {
+    if (mon.perishCount > 0) {
+      mon.perishCount -= 1;
+      if (mon.perishCount > 0) appendBattleLog(mon.displayName, `perish count fell to ${mon.perishCount}.`);
+      else applyDirectDamage(mon, mon.hp, "Perish Song");
+    }
+    if (mon.fainted) return;
+    if (mon.disabledTurns > 0) {
+      mon.disabledTurns -= 1;
+      if (mon.disabledTurns <= 0) {
+        mon.disabledMove = "";
+        mon.disabledTurns = 0;
+        appendBattleLog(mon.displayName, "is no longer disabled.");
+      }
+    }
+    if (clearsStatusInWeather(mon) && mon.status) {
+      mon.status = "";
+      mon.statusTurns = 0;
+      mon.toxicCounter = 0;
+      appendBattleLog(mon.displayName, "was cured by Hydration.");
+    }
+    if (abilityId(mon) === "shedskin" && mon.status && Math.random() < (1 / 3)) {
+      mon.status = "";
+      mon.statusTurns = 0;
+      mon.toxicCounter = 0;
+      appendBattleLog(mon.displayName, "shed its status condition.");
+    }
+    if (abilityId(mon) === "poisonheal" && (mon.status === "poison" || mon.status === "tox")) {
+      const healed = healCombatant(mon, Math.max(1, Math.floor(mon.maxHp / 8)));
+      if (healed > 0) appendBattleLog(mon.displayName, "restored HP with Poison Heal.");
+    } else if (mon.status === "burn" && abilityId(mon) !== "magicguard") {
+      applyDirectDamage(mon, Math.max(1, Math.floor(mon.maxHp / 16)), "Burn");
+    } else if (mon.status === "poison" && abilityId(mon) !== "magicguard") {
+      applyDirectDamage(mon, Math.max(1, Math.floor(mon.maxHp / 8)), "Poison");
+    } else if (mon.status === "tox" && abilityId(mon) !== "magicguard") {
       mon.toxicCounter = Math.max(1, mon.toxicCounter + 1);
       applyDirectDamage(mon, Math.max(1, Math.floor((mon.maxHp * mon.toxicCounter) / 16)), "Bad poison");
+    }
+    if (mon.fainted) return;
+    if (getActiveWeather() === "sand" && !isWeatherDamageImmune(mon, "sand")) {
+      applyDirectDamage(mon, Math.max(1, Math.floor(mon.maxHp / 16)), "Sandstorm");
+    } else if (getActiveWeather() === "snow" && !isWeatherDamageImmune(mon, "snow")) {
+      applyDirectDamage(mon, Math.max(1, Math.floor(mon.maxHp / 16)), "Snow");
+    } else if (getActiveWeather() === "rain") {
+      if (abilityId(mon) === "raindish") {
+        const healed = healCombatant(mon, Math.max(1, Math.floor(mon.maxHp / 16)));
+        if (healed > 0) appendBattleLog(mon.displayName, "restored HP with Rain Dish.");
+      }
+      if (abilityId(mon) === "dryskin") {
+        const healed = healCombatant(mon, Math.max(1, Math.floor(mon.maxHp / 8)));
+        if (healed > 0) appendBattleLog(mon.displayName, "restored HP with Dry Skin.");
+      }
+    } else if (getActiveWeather() === "sun") {
+      if (abilityId(mon) === "dryskin") applyDirectDamage(mon, Math.max(1, Math.floor(mon.maxHp / 8)), "Harsh sunlight");
+      if (abilityId(mon) === "solarpower") applyDirectDamage(mon, Math.max(1, Math.floor(mon.maxHp / 8)), "Solar Power");
+    }
+    if (mon.fainted) return;
+    if (getActiveWeather() === "snow" && abilityId(mon) === "icebody") {
+      const healed = healCombatant(mon, Math.max(1, Math.floor(mon.maxHp / 16)));
+      if (healed > 0) appendBattleLog(mon.displayName, "restored HP with Ice Body.");
+    }
+    if (getActiveWeather() === "snow" && abilityId(mon) === "iceface" && mon.iceFaceBroken) {
+      mon.iceFaceBroken = false;
+      appendBattleLog(mon.displayName, "restored its Ice Face in the snow.");
+    }
+    if (getActiveTerrain() === "grassy" && isGrounded(mon)) {
+      const healed = healCombatant(mon, Math.max(1, Math.floor(mon.maxHp / 16)));
+      if (healed > 0) appendBattleLog(mon.displayName, "restored HP from Grassy Terrain.");
+    }
+    if (mon.fainted) return;
+    if (abilityId(mon) === "speedboost") {
+      triggerBoostAbility(mon, [{ stat: "speed", change: 1 }], "raised its Speed with Speed Boost.");
     }
     if (mon.fainted) return;
     if (cleanText(mon.item) === "Leftovers" && !mon.itemConsumed) {
@@ -1935,7 +2211,7 @@ function applyEndOfTurnEffects() {
     if (cleanText(mon.item) === "Black Sludge" && !mon.itemConsumed) {
       if (mon.types.includes("Poison")) {
         if (healCombatant(mon, Math.max(1, Math.floor(mon.maxHp / 16))) > 0) appendBattleLog(mon.displayName, "restored HP with Black Sludge.");
-      } else {
+      } else if (abilityId(mon) !== "magicguard") {
         applyDirectDamage(mon, Math.max(1, Math.floor(mon.maxHp / 8)), "Black Sludge");
       }
     }
@@ -1945,7 +2221,9 @@ function applyEndOfTurnEffects() {
     if (cleanText(mon.item) === "Toxic Orb" && !mon.itemConsumed && !mon.status) {
       if (inflictMajorStatus(mon, "tox")) appendBattleLog(mon.displayName, "was badly poisoned by Toxic Orb.");
     }
+    refreshBattleFormState(mon);
   });
+  tickFieldDurations();
 }
 
 function autoReplaceFainted(sideKey) {
@@ -1961,6 +2239,27 @@ function forceSwitch(sideKey) {
   if (!team) return;
   const replacementIndex = team.combatants.findIndex((mon, index) => index !== team.active && !mon.fainted);
   if (replacementIndex >= 0) performSwitch(sideKey, replacementIndex, "replacement");
+}
+
+function tickFieldDurations() {
+  if (state.battle.weather && state.battle.weatherTurns > 0) {
+    state.battle.weatherTurns -= 1;
+    if (state.battle.weatherTurns <= 0) {
+      appendBattleLog("Weather", `${normalizeWeatherLabel(state.battle.weather)} faded.`);
+      state.battle.weather = "";
+      state.battle.weatherTurns = 0;
+      ["alpha", "beta"].forEach((sideKey) => refreshBattleFormState(getActiveCombatant(sideKey)));
+    }
+  }
+  if (state.battle.terrain && state.battle.terrainTurns > 0) {
+    state.battle.terrainTurns -= 1;
+    if (state.battle.terrainTurns <= 0) {
+      appendBattleLog("Terrain", `${normalizeTerrainLabel(state.battle.terrain)} disappeared.`);
+      state.battle.terrain = "";
+      state.battle.terrainTurns = 0;
+      ["alpha", "beta"].forEach((sideKey) => refreshBattleFormState(getActiveCombatant(sideKey)));
+    }
+  }
 }
 
 function setBattleWinnerIfNeeded() {
@@ -1998,6 +2297,22 @@ function renderBoostChips(mon) {
     return `<span class="boost-chip ${change > 0 ? "positive" : "negative"}">${escapeHtml(STAT_LABELS[key])} ${escapeHtml(`${change > 0 ? "+" : ""}${change}`)}</span>`;
   });
   return chips.length ? chips.join("") : '<span class="status-chip">No stat changes</span>';
+}
+
+function normalizeWeatherLabel(weather) {
+  if (weather === "rain") return "Rain";
+  if (weather === "sun") return "Sun";
+  if (weather === "sand") return "Sandstorm";
+  if (weather === "snow") return "Snow";
+  return weather || "";
+}
+
+function normalizeTerrainLabel(terrain) {
+  if (terrain === "electric") return "Electric Terrain";
+  if (terrain === "grassy") return "Grassy Terrain";
+  if (terrain === "misty") return "Misty Terrain";
+  if (terrain === "psychic") return "Psychic Terrain";
+  return terrain || "";
 }
 
 function buildMoveSummary(move, moveSlot) {
@@ -2213,7 +2528,22 @@ function createEmptySlot() {
 }
 
 function createEmptyBattleState() {
-  return { started: false, turn: 0, winner: "", teams: {}, pendingActions: { alpha: null, beta: null }, log: [] };
+  return {
+    started: false,
+    turn: 0,
+    winner: "",
+    weather: "",
+    weatherTurns: 0,
+    terrain: "",
+    terrainTurns: 0,
+    hazards: {
+      alpha: { spikes: 0, toxicSpikes: 0, stealthRock: false, stickyWeb: false },
+      beta: { spikes: 0, toxicSpikes: 0, stealthRock: false, stickyWeb: false },
+    },
+    teams: {},
+    pendingActions: { alpha: null, beta: null },
+    log: [],
+  };
 }
 
 function createBoostState() {
@@ -2237,10 +2567,23 @@ function calculateBattleStat(baseStat, level, isHp) {
 }
 
 function getModifiedBattleStat(mon, statKey, move) {
+  return getModifiedBattleStatWithStage(mon, statKey, mon.boosts[statKey] || 0, move);
+}
+
+function getModifiedBattleStatWithStage(mon, statKey, stage, move) {
   let value = statKey in mon.stats ? mon.stats[statKey] : 1;
-  if (statKey === "accuracy" || statKey === "evasion") return getAccuracyStageMultiplier(mon.boosts[statKey] || 0);
-  value *= getStatStageMultiplier(mon.boosts[statKey] || 0);
-  if (statKey === "speed" && mon.status === "paralysis") value *= 0.5;
+  if (statKey === "accuracy" || statKey === "evasion") return getAccuracyStageMultiplier(stage || 0);
+  value *= getStatStageMultiplier(stage || 0);
+  if (statKey === "attack" && ["hugepower", "purepower"].includes(abilityId(mon))) value *= 2;
+  if (statKey === "attack" && abilityId(mon) === "gorillatactics") value *= 1.5;
+  if (statKey === "speed" && getActiveWeather() === "rain" && abilityId(mon) === "swiftswim") value *= 2;
+  if (statKey === "speed" && getActiveWeather() === "sun" && abilityId(mon) === "chlorophyll") value *= 2;
+  if (statKey === "speed" && getActiveWeather() === "sand" && abilityId(mon) === "sandrush") value *= 2;
+  if (statKey === "speed" && getActiveWeather() === "snow" && abilityId(mon) === "slushrush") value *= 2;
+  if (statKey === "speed" && getActiveTerrain() === "electric" && abilityId(mon) === "surgesurfer") value *= 2;
+  if (statKey === "speed" && mon.status === "paralysis" && abilityId(mon) !== "quickfeet") value *= 0.5;
+  if (statKey === "speed" && mon.itemConsumed && abilityId(mon) === "unburden") value *= 2;
+  if (statKey === "speed" && abilityId(mon) === "quickfeet" && mon.status) value *= 1.5;
   if (statKey === "speed" && cleanText(mon.item) === "Choice Scarf" && !mon.itemConsumed) value *= 1.5;
   if (statKey === "attack" && cleanText(mon.item) === "Choice Band" && !mon.itemConsumed) value *= 1.5;
   if (statKey === "spattack" && cleanText(mon.item) === "Choice Specs" && !mon.itemConsumed) value *= 1.5;
@@ -2268,7 +2611,8 @@ function moveHitsTarget(user, target, move, targetIsOpponent) {
   const targetEvasion = getModifiedBattleStat(target, "evasion");
   const itemModifier = cleanText(user.item) === "Wide Lens" ? 1.1 : 1;
   const targetModifier = cleanText(target.item) === "Bright Powder" ? 0.9 : 1;
-  const chance = move.accuracy * userAccuracy / Math.max(0.1, targetEvasion) * itemModifier * targetModifier;
+  const abilityModifier = abilityId(user) === "hustle" && move.damageClass === "physical" ? 0.8 : 1;
+  const chance = move.accuracy * userAccuracy / Math.max(0.1, targetEvasion) * itemModifier * targetModifier * abilityModifier;
   return Math.random() * 100 < chance;
 }
 
@@ -2304,8 +2648,877 @@ function moveTargetsOpponent(move) {
   return !SELF_TARGETS.has(move.target) && move.target !== "users-field";
 }
 
+function abilityId(mon) {
+  return toId(typeof mon === "string" ? mon : mon?.ability);
+}
+
+function getCustomAbility(mon) {
+  return state.customAbilityById.get(abilityId(mon)) || null;
+}
+
+function getBattleSideForMon(mon) {
+  if (!state.battle.started || !mon) return "";
+  if (state.battle.teams.alpha?.combatants?.includes(mon)) return "alpha";
+  if (state.battle.teams.beta?.combatants?.includes(mon)) return "beta";
+  return "";
+}
+
+function hasActiveAbility(mon, abilityName, attacker = null) {
+  const id = abilityId(mon);
+  if (!id) return false;
+  if (isNeutralizingGasActive() && id !== "neutralizinggas") return false;
+  if (id !== toId(abilityName)) return false;
+  if (!attacker) return true;
+  return !isAbilitySuppressed(attacker, mon);
+}
+
+function isGrounded(mon) {
+  if (!mon || mon.fainted) return false;
+  if (mon.types.includes("Flying")) return false;
+  if (cleanText(mon.item) === "Air Balloon" && !mon.airBalloonPopped) return false;
+  if (hasActiveAbility(mon, "levitate")) return false;
+  return true;
+}
+
+function isAbilitySuppressed(attacker, defender) {
+  if (!attacker || !defender) return false;
+  if (isNeutralizingGasActive() && abilityId(defender) !== "neutralizinggas") return true;
+  const attackerAbility = abilityId(attacker);
+  const defenderAbility = abilityId(defender);
+  return MOLD_BREAKER_ABILITIES.has(attackerAbility) && IGNORABLE_DEFENDER_ABILITIES.has(defenderAbility);
+}
+
+function isNeutralizingGasActive() {
+  return ["alpha", "beta"].some((sideKey) => {
+    const mon = getActiveCombatant(sideKey);
+    return mon && !mon.fainted && abilityId(mon) === "neutralizinggas";
+  });
+}
+
+function hasGlobalWeatherSuppression() {
+  return ["alpha", "beta"].some((sideKey) => {
+    const mon = getActiveCombatant(sideKey);
+    return mon && !mon.fainted && ["airlock", "cloudnine"].includes(abilityId(mon));
+  });
+}
+
+function getActiveWeather() {
+  if (!state.battle.started || hasGlobalWeatherSuppression()) return "";
+  return state.battle.weather;
+}
+
+function getActiveTerrain() {
+  if (!state.battle.started) return "";
+  return state.battle.terrain;
+}
+
+function setWeather(weather, source) {
+  if (!state.battle.started) return;
+  if (state.battle.weather === weather) return;
+  state.battle.weather = weather;
+  state.battle.weatherTurns = ["Damp Rock", "Heat Rock", "Smooth Rock", "Icy Rock"].includes(cleanText(source.item)) && !source.itemConsumed ? 8 : 5;
+  appendBattleLog(source.displayName, `changed the weather to ${normalizeWeatherLabel(weather)}.`);
+  ["alpha", "beta"].forEach((sideKey) => refreshBattleFormState(getActiveCombatant(sideKey)));
+}
+
+function setTerrain(terrain, source) {
+  if (!state.battle.started) return;
+  if (state.battle.terrain === terrain) return;
+  state.battle.terrain = terrain;
+  state.battle.terrainTurns = cleanText(source.item) === "Terrain Extender" && !source.itemConsumed ? 8 : 5;
+  appendBattleLog(source.displayName, `created ${normalizeTerrainLabel(terrain)}.`);
+  ["alpha", "beta"].forEach((sideKey) => refreshBattleFormState(getActiveCombatant(sideKey)));
+}
+
+function clearsStatusInWeather(mon) {
+  return abilityId(mon) === "hydration" && getActiveWeather() === "rain";
+}
+
+function blocksStatusFromTerrain(mon, status) {
+  if (!isGrounded(mon)) return false;
+  if (getActiveTerrain() === "electric" && status === "sleep") return true;
+  if (getActiveTerrain() === "misty" && ["burn", "poison", "tox", "paralysis", "sleep", "freeze"].includes(status)) return true;
+  return false;
+}
+
+function blocksConfusionFromTerrain(mon) {
+  return getActiveTerrain() === "misty" && isGrounded(mon);
+}
+
+function isWeatherDamageImmune(mon, weather) {
+  if (abilityId(mon) === "magicguard") return true;
+  if (weather === "sand") {
+    return mon.types.some((type) => ["Rock", "Ground", "Steel"].includes(type))
+      || ["sandforce", "sandrush", "sandveil", "overcoat"].includes(abilityId(mon));
+  }
+  if (weather === "snow") {
+    return mon.types.includes("Ice") || ["icebody", "snowcloak", "overcoat"].includes(abilityId(mon));
+  }
+  return false;
+}
+
+function getWeatherPowerModifier(move) {
+  if (!move?.type) return 1;
+  if (getActiveWeather() === "rain") {
+    if (move.type === "Water") return 1.5;
+    if (move.type === "Fire") return 0.5;
+  }
+  if (getActiveWeather() === "sun") {
+    if (move.type === "Fire") return 1.5;
+    if (move.type === "Water") return 0.5;
+  }
+  return 1;
+}
+
+function isSoundMove(move) {
+  const id = move?.id || "";
+  return SOUND_MOVE_KEYWORDS.some((keyword) => id.includes(keyword));
+}
+
+function isBallOrBombMove(move) {
+  const id = move?.id || "";
+  return BALL_BOMB_MOVE_KEYWORDS.some((keyword) => id.includes(keyword));
+}
+
+function getMoveTypeForUse(user, move) {
+  if (!move) return "";
+  const id = abilityId(user);
+  if (id === "normalize") return "Normal";
+  if (id === "liquidvoice" && isSoundMove(move)) return "Water";
+  if (move.type === "Normal") {
+    if (id === "pixilate") return "Fairy";
+    if (id === "aerilate") return "Flying";
+    if (id === "refrigerate") return "Ice";
+    if (id === "galvanize") return "Electric";
+  }
+  return move.type;
+}
+
+function getMovePowerAbilityModifier(user, move) {
+  const id = abilityId(user);
+  if (move.originalType === "Normal" && ["pixilate", "aerilate", "refrigerate", "galvanize"].includes(id)) return 1.2;
+  if (id === "normalize") return 1.2;
+  return 1;
+}
+
+function getDisplayedMoveName(user, moveSlot, move) {
+  if (!move) return moveSlot.name;
+  if (move.id === "transform") return "Transform";
+  return moveSlot.name;
+}
+
+function getActualAbilityId(mon) {
+  return toId(typeof mon === "string" ? mon : mon?.ability);
+}
+
+function stripTypeChangingAbility(abilityName) {
+  const id = toId(abilityName);
+  if (["protean", "libero", "normalize", "pixilate", "aerilate", "refrigerate", "galvanize", "liquidvoice"].includes(id)) return "";
+  return abilityName;
+}
+
+function transformCombatant(mon, target, sourceLabel) {
+  if (!mon || !target || target.fainted || mon.transformed) return false;
+  mon.transformed = true;
+  mon.types = [...target.types];
+  mon.stats = { ...target.stats };
+  mon.ability = target.ability;
+  mon.moves = target.moves.map((moveSlot) => ({
+    name: moveSlot.name,
+    id: moveSlot.id,
+    pp: Math.min(5, moveSlot.maxPp),
+    maxPp: Math.min(5, moveSlot.maxPp),
+  }));
+  mon.boosts = { ...target.boosts };
+  appendBattleLog(mon.displayName, `${sourceLabel} copied ${target.displayName}'s form.`);
+  return true;
+}
+
+function restoreCombatantForm(mon) {
+  if (!mon?.transformed) return;
+  mon.transformed = false;
+  mon.types = [...mon.originalTypes];
+  mon.stats = { ...mon.originalStats };
+  mon.moves = mon.originalMoves.map((moveSlot) => ({ ...moveSlot }));
+  mon.ability = mon.originalAbility;
+  resetBoosts(mon);
+}
+
+function applyForecastForm(mon) {
+  if (!mon || getActualAbilityId(mon) !== "forecast") return;
+  const weather = getActiveWeather();
+  const nextType = weather === "sun" ? "Fire" : weather === "rain" ? "Water" : weather === "snow" ? "Ice" : mon.originalTypes[0];
+  mon.types = [nextType];
+}
+
+function applyMimicry(mon) {
+  if (!mon || getActualAbilityId(mon) !== "mimicry") return;
+  const terrain = getActiveTerrain();
+  if (!terrain) {
+    mon.types = [...mon.originalTypes];
+    return;
+  }
+  const terrainType = terrain === "electric" ? "Electric" : terrain === "grassy" ? "Grass" : terrain === "misty" ? "Fairy" : "Psychic";
+  mon.types = [terrainType];
+}
+
+function applySchoolingForm(mon) {
+  if (!mon || getActualAbilityId(mon) !== "schooling") return;
+  mon.currentForm = mon.hp > Math.floor(mon.maxHp / 4) ? "School" : "Solo";
+}
+
+function applyShieldsDownForm(mon) {
+  if (!mon || getActualAbilityId(mon) !== "shieldsdown") return;
+  mon.currentForm = mon.hp > Math.floor(mon.maxHp / 2) ? "Meteor" : "Core";
+}
+
+function applyZenModeForm(mon) {
+  if (!mon || getActualAbilityId(mon) !== "zenmode") return;
+  mon.currentForm = mon.hp <= Math.floor(mon.maxHp / 2) ? "Zen" : "Base";
+}
+
+function applyStanceChange(mon, move) {
+  if (!mon || getActualAbilityId(mon) !== "stancechange" || !move) return;
+  const nextForm = move.id === "kings-shield" ? "Shield" : "Blade";
+  mon.currentForm = nextForm;
+}
+
+function refreshBattleFormState(mon) {
+  if (!mon) return;
+  applyForecastForm(mon);
+  applyMimicry(mon);
+  applySchoolingForm(mon);
+  applyShieldsDownForm(mon);
+  applyZenModeForm(mon);
+}
+
+function matchesAbilityModifierChance(modifier) {
+  return Math.random() * 100 < (modifier?.chance || 100);
+}
+
+function resolveAbilityModifierTarget(mon, modifier, context = {}) {
+  if (!modifier) return null;
+  if (modifier.target === "self") return mon;
+  if (modifier.target === "opponent") return context.opponent || context.target || getActiveCombatant(otherSideKey(getBattleSideForMon(mon)));
+  if (modifier.target === "attacker") return context.attacker || context.opponent || null;
+  if (modifier.target === "replacement") return context.replacement || null;
+  if (modifier.target === "used-move") return context.move || null;
+  if (modifier.target === "field") return state.battle;
+  return mon;
+}
+
+function applyCustomAbilityStatus(target, modifier, source) {
+  if (!target) return false;
+  if (modifier.status === "confusion") return inflictConfusion(target, { source });
+  return inflictMajorStatus(target, modifier.status, { source });
+}
+
+function applyCustomAbilityModifier(mon, modifier, context = {}) {
+  const target = resolveAbilityModifierTarget(mon, modifier, context);
+  if (!target) return false;
+  if (modifier.action === "raise-stat" || modifier.action === "lower-stat") {
+    if (!target.boosts) return false;
+    const change = modifier.action === "raise-stat" ? modifier.stages : -modifier.stages;
+    const applied = applyBoostChanges(target, [{ stat: modifier.stat, change }], change < 0 ? mon : null);
+    if (applied.length) appendBattleLog(target.displayName, describeBoostChanges(applied));
+    return applied.length > 0;
+  }
+  if (modifier.action === "inflict-status" || modifier.action === "contact-reaction") {
+    const applied = applyCustomAbilityStatus(target, modifier, mon);
+    if (applied) appendBattleLog(target.displayName, modifier.status === "confusion" ? "became confused." : describeStatusInfliction(modifier.status));
+    return applied;
+  }
+  if (modifier.action === "heal") {
+    const healed = healCombatant(target, Math.max(1, Math.floor((target.maxHp * modifier.amount) / 100)));
+    if (healed > 0) appendBattleLog(target.displayName, `restored ${healed} HP.`);
+    return healed > 0;
+  }
+  if (modifier.action === "damage") {
+    const basis = target.maxHp || 0;
+    if (!basis) return false;
+    return applyDirectDamage(target, Math.max(1, Math.floor((basis * modifier.amount) / 100)), mon.ability || "Ability effect") > 0;
+  }
+  if (modifier.action === "set-weather") {
+    if (modifier.weather === "clear") {
+      state.battle.weather = "";
+      state.battle.weatherTurns = 0;
+      appendBattleLog(mon.displayName, "cleared the weather.");
+      return true;
+    }
+    setWeather(modifier.weather, mon);
+    return true;
+  }
+  if (modifier.action === "set-terrain") {
+    if (modifier.terrain === "clear") {
+      state.battle.terrain = "";
+      state.battle.terrainTurns = 0;
+      appendBattleLog(mon.displayName, "cleared the terrain.");
+      return true;
+    }
+    setTerrain(modifier.terrain, mon);
+    return true;
+  }
+  return false;
+}
+
+function runCustomAbilityEvent(mon, eventName, context = {}) {
+  const ability = getCustomAbility(mon);
+  if (!ability?.modifiers?.length) return;
+  ability.modifiers
+    .filter((modifier) => modifier.event === eventName)
+    .forEach((modifier) => {
+      if (!matchesAbilityModifierChance(modifier)) return;
+      applyCustomAbilityModifier(mon, modifier, context);
+    });
+}
+
+function applyCustomAbilityMoveUse(mon, move, context = {}) {
+  const ability = getCustomAbility(mon);
+  if (!ability?.modifiers?.length || !move) return;
+  ability.modifiers
+    .filter((modifier) => modifier.event === "move-use")
+    .forEach((modifier) => {
+      if (!matchesAbilityModifierChance(modifier)) return;
+      if (modifier.action === "rewrite-move-type") {
+        move.type = modifier.type;
+      }
+      if (modifier.action === "rewrite-move-category") {
+        move.damageClass = normalizeMoveCategory(modifier.moveCategory);
+      }
+    });
+}
+
+function getCustomAbilityPriorityBonus(mon) {
+  const ability = getCustomAbility(mon);
+  if (!ability?.modifiers?.length) return 0;
+  return ability.modifiers
+    .filter((modifier) => modifier.event === "priority-targeting" && modifier.action === "modify-priority")
+    .reduce((total, modifier) => total + (safeNumber(modifier.priority) || 0), 0);
+}
+
+function getCustomAbilityDamageModifier(mon, move, eventName, typeMultiplier = 1) {
+  const ability = getCustomAbility(mon);
+  if (!ability?.modifiers?.length || !move) return 1;
+  return ability.modifiers
+    .filter((modifier) => modifier.event === eventName)
+    .reduce((modifierTotal, modifier) => {
+      if (modifier.action === "boost-type-damage" && move.type === modifier.type) {
+        return modifierTotal * (1 + (modifier.amount / 100));
+      }
+      if (modifier.action === "reduce-type-damage" && move.type === modifier.type) {
+        return modifierTotal * Math.max(0, 1 - (modifier.amount / 100));
+      }
+      if (modifier.action === "boost-type-damage" && modifier.type === "All" && typeMultiplier > 1) {
+        return modifierTotal * (1 + (modifier.amount / 100));
+      }
+      return modifierTotal;
+    }, 1);
+}
+
+function handleCustomAbilityMoveImmunity(attacker, defender, move) {
+  const ability = getCustomAbility(defender);
+  if (!ability?.modifiers?.length || !move) return false;
+  const immunity = ability.modifiers.find((modifier) => modifier.event === "immunity-damage" && modifier.action === "grant-immunity" && modifier.type === move.type);
+  if (!immunity) return false;
+  appendBattleLog(defender.displayName, `is immune to ${move.type}-type moves because of ${defender.ability}.`);
+  return true;
+}
+
+function getHighestStatKey(mon) {
+  const keys = ["attack", "defense", "spattack", "spdefense", "speed"];
+  return keys.reduce((best, key) => (mon.stats[key] > mon.stats[best] ? key : best), "attack");
+}
+
+function opposingActiveHasAbility(mon, abilityName) {
+  if (!state.battle.started || !mon) return false;
+  const sideKey = ["alpha", "beta"].find((key) => state.battle.teams[key]?.combatants?.includes(mon));
+  if (!sideKey) return false;
+  const foe = getActiveCombatant(otherSideKey(sideKey));
+  return Boolean(foe && !foe.fainted && abilityId(foe) === toId(abilityName));
+}
+
+function triggerBoostAbility(mon, boosts, text) {
+  const applied = applyBoostChanges(mon, boosts);
+  if (applied.length) appendBattleLog(mon.displayName, text);
+}
+
+function triggerFaintAbilities(faintedMon, source = {}) {
+  const attacker = source.attacker;
+  if (attacker && attacker !== faintedMon && !attacker.fainted) {
+    const attackerAbility = abilityId(attacker);
+    if (attackerAbility === "moxie") triggerBoostAbility(attacker, [{ stat: "attack", change: 1 }], "raised its Attack with Moxie.");
+    if (attackerAbility === "chillingneigh") triggerBoostAbility(attacker, [{ stat: "attack", change: 1 }], "raised its Attack with Chilling Neigh.");
+    if (attackerAbility === "grimneigh") triggerBoostAbility(attacker, [{ stat: "spattack", change: 1 }], "raised its Sp. Atk with Grim Neigh.");
+    if (attackerAbility === "beastboost") {
+      const bestStat = getHighestStatKey(attacker);
+      triggerBoostAbility(attacker, [{ stat: bestStat, change: 1 }], `raised its ${STAT_LABELS[bestStat]} with Beast Boost.`);
+    }
+  }
+  ["alpha", "beta"].forEach((sideKey) => {
+    const active = getActiveCombatant(sideKey);
+    if (!active || active === faintedMon || active.fainted) return;
+    if (abilityId(active) === "soulheart") {
+      triggerBoostAbility(active, [{ stat: "spattack", change: 1 }], "raised its Sp. Atk with Soul-Heart.");
+    }
+  });
+}
+
+function getAbilityPriorityBonus(mon, move) {
+  const id = abilityId(mon);
+  if (!move) return 0;
+  let bonus = getCustomAbilityPriorityBonus(mon);
+  if (id === "prankster" && move.damageClass === "status") bonus += 1;
+  if (id === "galewings" && move.type === "Flying" && mon.hp === mon.maxHp) bonus += 1;
+  if (id === "triage" && isHealingMove(move)) bonus += 3;
+  if (id === "stall") bonus -= 0.1;
+  return bonus;
+}
+
+function isHealingMove(move) {
+  if (!move) return false;
+  return move.healing > 0 || move.drain > 0 || HEALING_MOVE_IDS.has(move.id);
+}
+
+function moveHasSecondaryEffects(move) {
+  if (!move) return false;
+  return Boolean(
+    move.flinchChance > 0
+    || (move.ailment && move.ailment !== "none" && move.ailment !== "unknown")
+    || (Array.isArray(move.boosts) && move.boosts.length && (move.statChance || move.damageClass === "status"))
+    || (Array.isArray(move.modifiers) && move.modifiers.length)
+  );
+}
+
+function getModifiedMovePower(user, target, move) {
+  let power = Math.max(0, move?.power || 0);
+  const userAbility = abilityId(user);
+  if (userAbility === "technician" && power > 0 && power <= 60) power = Math.floor(power * 1.5);
+  return power;
+}
+
+function getStabModifier(user) {
+  return abilityId(user) === "adaptability" ? 2 : 1.5;
+}
+
+function getOffensiveAbilityModifier(user, target, move, typeMultiplier) {
+  const id = abilityId(user);
+  let modifier = 1;
+  if (id === "blaze" && move.type === "Fire" && user.hp <= Math.floor(user.maxHp / 3)) modifier *= 1.5;
+  if (id === "torrent" && move.type === "Water" && user.hp <= Math.floor(user.maxHp / 3)) modifier *= 1.5;
+  if (id === "overgrow" && move.type === "Grass" && user.hp <= Math.floor(user.maxHp / 3)) modifier *= 1.5;
+  if (id === "swarm" && move.type === "Bug" && user.hp <= Math.floor(user.maxHp / 3)) modifier *= 1.5;
+  if (id === "guts" && move.damageClass === "physical" && user.status) modifier *= 1.5;
+  if (id === "flashfire" && user.flashFireBoost && move.type === "Fire") modifier *= 1.5;
+  if (id === "waterbubble" && move.type === "Water") modifier *= 2;
+  if (id === "tintedlens" && typeMultiplier > 0 && typeMultiplier < 1) modifier *= 2;
+  if (id === "solarpower" && getActiveWeather() === "sun" && move.damageClass === "special") modifier *= 1.5;
+  if (id === "sheerforce" && move.damageClass !== "status" && moveHasSecondaryEffects(move)) modifier *= 1.3;
+  return modifier;
+}
+
+function getDefensiveAbilityModifier(attacker, defender, move, typeMultiplier) {
+  const id = getActualAbilityId(defender);
+  if (isAbilitySuppressed(attacker, defender)) return 1;
+  let modifier = 1;
+  if (["filter", "solidrock", "prismarmor"].includes(id) && typeMultiplier > 1) modifier *= 0.75;
+  if (id === "thickfat" && (move.type === "Fire" || move.type === "Ice")) modifier *= 0.5;
+  if (id === "heatproof" && move.type === "Fire") modifier *= 0.5;
+  if (id === "multiscale" && defender.hp === defender.maxHp) modifier *= 0.5;
+  if (id === "shadowshield" && defender.hp === defender.maxHp) modifier *= 0.5;
+  if (id === "furcoat" && move.damageClass === "physical") modifier *= 0.5;
+  if (id === "icescales" && move.damageClass === "special") modifier *= 0.5;
+  if (id === "marvelscale" && move.damageClass === "physical" && defender.status) modifier *= (2 / 3);
+  if (id === "waterbubble" && move.type === "Fire") modifier *= 0.5;
+  if (id === "dryskin" && move.type === "Fire") modifier *= 1.25;
+  if (id === "fluffy") {
+    if (move.type === "Fire") modifier *= 2;
+    else if (isContactMove(move)) modifier *= 0.5;
+  }
+  return modifier;
+}
+
+function handleAbilityMoveImmunity(attacker, defender, move) {
+  if (!defender || !move || isAbilitySuppressed(attacker, defender)) return false;
+  const id = getActualAbilityId(defender);
+  if (id === "soundproof" && isSoundMove(move)) {
+    appendBattleLog(defender.displayName, "ignored the sound move with Soundproof.");
+    return true;
+  }
+  if (id === "bulletproof" && isBallOrBombMove(move)) {
+    appendBattleLog(defender.displayName, "blocked the projectile move with Bulletproof.");
+    return true;
+  }
+  if (id === "levitate" && move.type === "Ground") {
+    appendBattleLog(defender.displayName, "is immune thanks to Levitate.");
+    return true;
+  }
+  if (id === "flashfire" && move.type === "Fire") {
+    defender.flashFireBoost = true;
+    appendBattleLog(defender.displayName, "absorbed the fire with Flash Fire.");
+    return true;
+  }
+  if (id === "waterabsorb" && move.type === "Water") {
+    const healed = healCombatant(defender, Math.max(1, Math.floor(defender.maxHp / 4)));
+    if (healed > 0) appendBattleLog(defender.displayName, `restored ${healed} HP with Water Absorb.`);
+    else appendBattleLog(defender.displayName, "ignored the Water-type move with Water Absorb.");
+    return true;
+  }
+  if (id === "dryskin" && move.type === "Water") {
+    const healed = healCombatant(defender, Math.max(1, Math.floor(defender.maxHp / 4)));
+    if (healed > 0) appendBattleLog(defender.displayName, `restored ${healed} HP with Dry Skin.`);
+    else appendBattleLog(defender.displayName, "ignored the Water-type move with Dry Skin.");
+    return true;
+  }
+  if (id === "stormdrain" && move.type === "Water") {
+    applyBoostChanges(defender, [{ stat: "spattack", change: 1 }]);
+    appendBattleLog(defender.displayName, "drew in the Water-type move with Storm Drain.");
+    return true;
+  }
+  if (id === "voltabsorb" && move.type === "Electric") {
+    const healed = healCombatant(defender, Math.max(1, Math.floor(defender.maxHp / 4)));
+    if (healed > 0) appendBattleLog(defender.displayName, `restored ${healed} HP with Volt Absorb.`);
+    else appendBattleLog(defender.displayName, "ignored the Electric-type move with Volt Absorb.");
+    return true;
+  }
+  if (id === "lightningrod" && move.type === "Electric") {
+    applyBoostChanges(defender, [{ stat: "spattack", change: 1 }]);
+    appendBattleLog(defender.displayName, "drew in the Electric-type move with Lightning Rod.");
+    return true;
+  }
+  if (id === "motordrive" && move.type === "Electric") {
+    applyBoostChanges(defender, [{ stat: "speed", change: 1 }]);
+    appendBattleLog(defender.displayName, "boosted its Speed with Motor Drive.");
+    return true;
+  }
+  if (id === "sapsipper" && move.type === "Grass") {
+    applyBoostChanges(defender, [{ stat: "attack", change: 1 }]);
+    appendBattleLog(defender.displayName, "raised its Attack with Sap Sipper.");
+    return true;
+  }
+  if (id === "eartheater" && move.type === "Ground") {
+    const healed = healCombatant(defender, Math.max(1, Math.floor(defender.maxHp / 4)));
+    if (healed > 0) appendBattleLog(defender.displayName, `restored ${healed} HP with Earth Eater.`);
+    return true;
+  }
+  if (id === "wellbakedbody" && move.type === "Fire") {
+    applyBoostChanges(defender, [{ stat: "defense", change: 2 }]);
+    appendBattleLog(defender.displayName, "hardened itself with Well-Baked Body.");
+    return true;
+  }
+  if (id === "wonderguard" && move.damageClass !== "status" && getTypeMultiplier(move.type, defender.types, defender) <= 1) {
+    appendBattleLog(defender.displayName, "is protected by Wonder Guard.");
+    return true;
+  }
+  if (id === "goodasgold" && move.damageClass === "status") {
+    appendBattleLog(defender.displayName, "blocked the status move with Good as Gold.");
+    return true;
+  }
+  return false;
+}
+
+function canReceiveStatus(mon, status, source = null) {
+  if (blocksStatusFromTerrain(mon, status)) return false;
+  const id = getActualAbilityId(mon);
+  if (!id || (source && isAbilitySuppressed(source, mon))) return true;
+  if (id === "leafguard" && getActiveWeather() === "sun") return false;
+  if (["comatose", "purifyingsalt"].includes(id)) return false;
+  if (status === "burn" && ["waterveil", "waterbubble"].includes(id)) return false;
+  if (status === "paralysis" && id === "limber") return false;
+  if ((status === "poison" || status === "tox") && ["immunity", "pastelveil"].includes(id)) return false;
+  if (status === "sleep" && ["insomnia", "vitalspirit", "sweetveil"].includes(id)) return false;
+  if (status === "freeze" && id === "magmaarmor") return false;
+  return true;
+}
+
+function canReceiveConfusion(mon, source = null) {
+  if (blocksConfusionFromTerrain(mon)) return false;
+  const id = getActualAbilityId(mon);
+  if (!id || (source && isAbilitySuppressed(source, mon))) return true;
+  return !["owntempo", "comatose", "purifyingsalt"].includes(id);
+}
+
+function isContactMove(move) {
+  if (!move || move.damageClass !== "physical") return false;
+  const id = move.id || "";
+  if (NON_CONTACT_MOVE_IDS.has(id)) return false;
+  if (CONTACT_HINT_KEYWORDS.some((hint) => id.includes(hint))) return true;
+  if (NON_CONTACT_HINT_KEYWORDS.some((hint) => id.includes(hint))) return false;
+  return move.target === "selected-pokemon" || move.target === "random-opponent";
+}
+
+function applyContactAbilityEffects(attacker, defender, move) {
+  if (!attacker || !defender || attacker.fainted || !isContactMove(move) || isAbilitySuppressed(attacker, defender)) return;
+  const id = getActualAbilityId(defender);
+  if (["roughskin", "ironbarbs"].includes(id)) {
+    applyDirectDamage(attacker, Math.max(1, Math.floor(attacker.maxHp / 8)), defender.ability || "contact recoil");
+    return;
+  }
+  if (["gooey", "tanglinghair"].includes(id)) {
+    const applied = applyBoostChanges(attacker, [{ stat: "speed", change: -1 }], defender);
+    if (applied.length) appendBattleLog(attacker.displayName, "had its Speed lowered by contact.");
+    return;
+  }
+  if (id === "static" && Math.random() < 0.3) {
+    if (inflictMajorStatus(attacker, "paralysis")) appendBattleLog(attacker.displayName, "was paralyzed by Static.");
+    return;
+  }
+  if (id === "flamebody" && Math.random() < 0.3) {
+    if (inflictMajorStatus(attacker, "burn")) appendBattleLog(attacker.displayName, "was burned by Flame Body.");
+    return;
+  }
+  if (id === "poisonpoint" && Math.random() < 0.3) {
+    if (inflictMajorStatus(attacker, "poison")) appendBattleLog(attacker.displayName, "was poisoned by Poison Point.");
+    return;
+  }
+  if (id === "effectspore" && !attacker.types.includes("Grass") && Math.random() < 0.3) {
+    const roll = Math.random();
+    if (roll < 1 / 3) {
+      if (inflictMajorStatus(attacker, "sleep")) appendBattleLog(attacker.displayName, "fell asleep from Effect Spore.");
+    } else if (roll < 2 / 3) {
+      if (inflictMajorStatus(attacker, "paralysis")) appendBattleLog(attacker.displayName, "was paralyzed by Effect Spore.");
+    } else if (inflictMajorStatus(attacker, "poison")) {
+      appendBattleLog(attacker.displayName, "was poisoned by Effect Spore.");
+    }
+  }
+  if (id === "mummy" && !UNSWAPPABLE_ABILITIES.has(abilityId(attacker))) {
+    attacker.ability = "Mummy";
+    appendBattleLog(attacker.displayName, "had its ability changed to Mummy.");
+  }
+  if (id === "lingeringaroma" && !UNSWAPPABLE_ABILITIES.has(abilityId(attacker))) {
+    attacker.ability = "Lingering Aroma";
+    appendBattleLog(attacker.displayName, "had its ability changed to Lingering Aroma.");
+  }
+  if (id === "wanderingspirit" && !UNSWAPPABLE_ABILITIES.has(abilityId(attacker)) && !UNSWAPPABLE_ABILITIES.has(id)) {
+    const defenderAbilityName = defender.ability;
+    defender.ability = attacker.ability;
+    attacker.ability = defenderAbilityName;
+    appendBattleLog(defender.displayName, "swapped abilities with Wandering Spirit.");
+  }
+}
+
+function applyAftermathAbility(attacker, defender, move) {
+  if (!attacker || attacker.fainted || !defender || !isContactMove(move) || isAbilitySuppressed(attacker, defender)) return;
+  if (getActualAbilityId(defender) === "aftermath") {
+    applyDirectDamage(attacker, Math.max(1, Math.floor(attacker.maxHp / 4)), "Aftermath");
+  }
+}
+
+function applyDamageTakenAbilityEffects(attacker, defender, move) {
+  if (!attacker || !defender || defender.fainted || isAbilitySuppressed(attacker, defender)) return;
+  const id = getActualAbilityId(defender);
+  if (id === "stamina") {
+    triggerBoostAbility(defender, [{ stat: "defense", change: 1 }], "raised its Defense with Stamina.");
+  }
+  if (id === "weakarmor" && move.damageClass === "physical") {
+    const lowered = applyBoostChanges(defender, [{ stat: "defense", change: -1 }], attacker);
+    const raised = applyBoostChanges(defender, [{ stat: "speed", change: 2 }]);
+    if (lowered.length || raised.length) appendBattleLog(defender.displayName, "changed its stats with Weak Armor.");
+  }
+  if (id === "watercompaction" && move.type === "Water") {
+    triggerBoostAbility(defender, [{ stat: "defense", change: 2 }], "raised its Defense with Water Compaction.");
+  }
+  if (id === "justified" && move.type === "Dark") {
+    triggerBoostAbility(defender, [{ stat: "attack", change: 1 }], "raised its Attack with Justified.");
+  }
+  if (id === "rattled" && ["Bug", "Dark", "Ghost"].includes(move.type)) {
+    triggerBoostAbility(defender, [{ stat: "speed", change: 1 }], "raised its Speed with Rattled.");
+  }
+  if (id === "berserk" && defender.hp > 0 && defender.hp <= Math.floor(defender.maxHp / 2) && !defender.berserkTriggered) {
+    defender.berserkTriggered = true;
+    triggerBoostAbility(defender, [{ stat: "spattack", change: 1 }], "raised its Sp. Atk with Berserk.");
+  }
+  if (id === "colorchange" && move.type && defender.types[0] !== move.type) {
+    defender.types = [move.type];
+    appendBattleLog(defender.displayName, `changed type to ${move.type} with Color Change.`);
+  }
+  if (id === "cursedbody" && attacker.lastMoveUsed && Math.random() < 0.3) {
+    attacker.disabledMove = attacker.lastMoveUsed;
+    attacker.disabledTurns = 4;
+    appendBattleLog(attacker.displayName, `${attacker.lastMoveUsed} was disabled by Cursed Body.`);
+  }
+  if (id === "perishbody" && isContactMove(move)) {
+    attacker.perishCount = 3;
+    defender.perishCount = 3;
+    appendBattleLog(defender.displayName, "started a perish count with Perish Body.");
+  }
+  if (id === "cottondown" && !attacker.fainted) {
+    const applied = applyBoostChanges(attacker, [{ stat: "speed", change: -1 }], defender);
+    if (applied.length) appendBattleLog(attacker.displayName, "had its Speed lowered by Cotton Down.");
+  }
+  if (id === "sandspit") setWeather("sand", defender);
+  if (id === "seedsower") setTerrain("grassy", defender);
+}
+
+function canStealItem(source, target) {
+  if (!source || !target || source.fainted || target.fainted) return false;
+  if (source.item || !target.item || target.itemConsumed) return false;
+  if (abilityId(target) === "stickyhold") return false;
+  return true;
+}
+
+function stealItem(source, target, label) {
+  if (!canStealItem(source, target)) {
+    if (abilityId(target) === "stickyhold" && target.item && !target.itemConsumed) appendBattleLog(target.displayName, "held onto its item with Sticky Hold.");
+    return false;
+  }
+  source.item = target.item;
+  source.itemConsumed = false;
+  target.item = "";
+  target.itemConsumed = false;
+  appendBattleLog(source.displayName, `${label} stole ${source.item}.`);
+  return true;
+}
+
+function applyItemTheftAbilities(attacker, defender, move, totalDamage) {
+  if (!attacker || !defender || !totalDamage) return;
+  if (abilityId(attacker) === "magician" && !attacker.stolenItemThisTurn) {
+    attacker.stolenItemThisTurn = stealItem(attacker, defender, "Magician");
+  }
+  if (getActualAbilityId(defender) === "pickpocket" && isContactMove(move) && !defender.stolenItemThisTurn) {
+    defender.stolenItemThisTurn = stealItem(defender, attacker, "Pickpocket");
+  }
+}
+
+function applyReflectedStatusMove(user, reflector, move) {
+  if (!user || user.fainted) return false;
+  if (move.id === "toxic-spikes" || move.id === "spikes" || move.id === "stealth-rock" || move.id === "sticky-web") {
+    return true;
+  }
+  if (move.id === "toxic") {
+    if (inflictMajorStatus(user, "tox", { ...move, source: reflector })) appendBattleLog(user.displayName, "was badly poisoned.");
+    return true;
+  }
+  if (move.boosts?.length) {
+    const applied = applyBoostChanges(user, move.boosts, reflector);
+    if (applied.length) appendBattleLog(user.displayName, describeBoostChanges(applied));
+    return true;
+  }
+  if (move.ailment === "confusion") {
+    if (inflictConfusion(user, { ...move, source: reflector })) appendBattleLog(user.displayName, "became confused.");
+    return true;
+  }
+  if (["burn", "poison", "paralysis", "sleep", "freeze"].includes(move.ailment)) {
+    if (inflictMajorStatus(user, move.ailment, { ...move, source: reflector })) appendBattleLog(user.displayName, describeStatusInfliction(move.ailment));
+    return true;
+  }
+  return false;
+}
+
+function placeHazard(sideKey, moveId) {
+  const hazards = state.battle.hazards[sideKey];
+  if (!hazards) return false;
+  if (moveId === "stealth-rock") {
+    if (hazards.stealthRock) return false;
+    hazards.stealthRock = true;
+    return true;
+  }
+  if (moveId === "spikes") {
+    if (hazards.spikes >= 3) return false;
+    hazards.spikes += 1;
+    return true;
+  }
+  if (moveId === "toxic-spikes") {
+    if (hazards.toxicSpikes >= 2) return false;
+    hazards.toxicSpikes += 1;
+    return true;
+  }
+  if (moveId === "sticky-web") {
+    if (hazards.stickyWeb) return false;
+    hazards.stickyWeb = true;
+    return true;
+  }
+  return false;
+}
+
+function applyEntryHazards(sideKey) {
+  const mon = getActiveCombatant(sideKey);
+  const hazards = state.battle.hazards[sideKey];
+  if (!mon || mon.fainted || !hazards) return;
+  if (cleanText(mon.item) === "Heavy-Duty Boots" && !mon.itemConsumed) {
+    appendBattleLog(mon.displayName, "ignored entry hazards with Heavy-Duty Boots.");
+    return;
+  }
+  if (hazards.toxicSpikes && mon.types.includes("Poison")) {
+    hazards.toxicSpikes = 0;
+    appendBattleLog(mon.displayName, "absorbed the Toxic Spikes.");
+  }
+  if (hazards.stealthRock && abilityId(mon) !== "magicguard") {
+    const multiplier = Math.max(0.25, getTypeMultiplier("Rock", mon.types, mon));
+    applyDirectDamage(mon, Math.max(1, Math.floor((mon.maxHp * multiplier) / 8)), "Stealth Rock");
+  }
+  if (mon.fainted) return;
+  if (hazards.spikes && isGrounded(mon) && abilityId(mon) !== "magicguard") {
+    const fraction = hazards.spikes === 1 ? 8 : hazards.spikes === 2 ? 6 : 4;
+    applyDirectDamage(mon, Math.max(1, Math.floor(mon.maxHp / fraction)), "Spikes");
+  }
+  if (mon.fainted) return;
+  if (hazards.toxicSpikes && isGrounded(mon) && !mon.types.includes("Poison") && !mon.types.includes("Steel")) {
+    const status = hazards.toxicSpikes >= 2 ? "tox" : "poison";
+    if (inflictMajorStatus(mon, status)) appendBattleLog(mon.displayName, status === "tox" ? "was badly poisoned by Toxic Spikes." : "was poisoned by Toxic Spikes.");
+  }
+  if (hazards.stickyWeb && isGrounded(mon)) {
+    const applied = applyBoostChanges(mon, [{ stat: "speed", change: -1 }]);
+    if (applied.length) appendBattleLog(mon.displayName, "was slowed by Sticky Web.");
+  }
+}
+
+function applySwitchOutAbilities(mon) {
+  const id = getActualAbilityId(mon);
+  if (id === "naturalcure" && (mon.status || mon.confusionTurns > 0)) {
+    mon.status = "";
+    mon.statusTurns = 0;
+    mon.toxicCounter = 0;
+    mon.confusionTurns = 0;
+    appendBattleLog(mon.displayName, "was cured by Natural Cure.");
+  }
+  if (id === "regenerator" && !mon.fainted) {
+    const healed = healCombatant(mon, Math.max(1, Math.floor(mon.maxHp / 3)));
+    if (healed > 0) appendBattleLog(mon.displayName, `restored ${healed} HP with Regenerator.`);
+  }
+  if (id === "neutralizinggas") {
+    appendBattleLog(mon.displayName, "stopped releasing Neutralizing Gas.");
+  }
+  mon.ability = mon.originalAbility;
+}
+
+function applySwitchInAbilities(sideKey, mode) {
+  const mon = getActiveCombatant(sideKey);
+  const foe = getActiveCombatant(otherSideKey(sideKey));
+  if (!mon || mon.fainted) return;
+  const id = getActualAbilityId(mon);
+  if (id === "intimidate" && foe && !foe.fainted && hasActiveAbility(mon, "intimidate")) {
+    const applied = applyBoostChanges(foe, [{ stat: "attack", change: -1 }], mon);
+    if (applied.length) appendBattleLog(mon.displayName, `lowered ${foe.displayName}'s Attack with Intimidate.`);
+  }
+  if (id === "intrepidsword") triggerBoostAbility(mon, [{ stat: "attack", change: 1 }], "raised its Attack with Intrepid Sword.");
+  if (id === "dauntlessshield") triggerBoostAbility(mon, [{ stat: "defense", change: 1 }], "raised its Defense with Dauntless Shield.");
+  if (id === "drizzle") setWeather("rain", mon);
+  if (id === "drought") setWeather("sun", mon);
+  if (id === "sandstream") setWeather("sand", mon);
+  if (id === "snowwarning") setWeather("snow", mon);
+  if (id === "electricsurge") setTerrain("electric", mon);
+  if (id === "grassysurge") setTerrain("grassy", mon);
+  if (id === "mistysurge") setTerrain("misty", mon);
+  if (id === "psychicsurge") setTerrain("psychic", mon);
+  if (id === "trace" && foe && foe.ability) {
+    mon.ability = stripTypeChangingAbility(foe.ability) || foe.ability;
+    appendBattleLog(mon.displayName, `copied ${foe.displayName}'s ability with Trace.`);
+  }
+  if (id === "imposter" && foe && !foe.fainted) {
+    transformCombatant(mon, foe, "Imposter");
+  }
+  if (id === "frisk" && foe?.item) {
+    appendBattleLog(mon.displayName, `revealed ${foe.displayName}'s ${foe.item} with Frisk.`);
+  }
+  if (id === "neutralizinggas") {
+    appendBattleLog(mon.displayName, "filled the field with Neutralizing Gas.");
+  }
+  if (mode === "lead" && id) appendBattleLog(mon.displayName, `entered battle with ${mon.ability || "its ability"}.`);
+}
+
 function inflictMajorStatus(mon, status, move = {}) {
   if (mon.fainted || mon.status) return false;
+  if (!canReceiveStatus(mon, status, move.source)) return false;
   if (status === "burn" && mon.types.includes("Fire")) return false;
   if ((status === "poison" || status === "tox") && (mon.types.includes("Poison") || mon.types.includes("Steel"))) return false;
   if (status === "freeze" && mon.types.includes("Ice")) return false;
@@ -2319,6 +3532,7 @@ function inflictMajorStatus(mon, status, move = {}) {
 
 function inflictConfusion(mon, move) {
   if (mon.fainted || mon.confusionTurns > 0) return false;
+  if (!canReceiveConfusion(mon, move.source)) return false;
   mon.confusionTurns = move.maxTurns ? randomBetween(move.minTurns || 2, move.maxTurns) : randomBetween(2, 4);
   if (maybeUseStatusCureItem(mon, "confusion")) return false;
   return true;
@@ -2327,6 +3541,7 @@ function inflictConfusion(mon, move) {
 function maybeUseStatusCureItem(mon, incomingStatus) {
   const item = cleanText(mon.item);
   if (mon.itemConsumed || !item) return false;
+  if (opposingActiveHasAbility(mon, "unnerve") && /Berry/i.test(item)) return false;
   if (item === "Lum Berry" && (incomingStatus || mon.status || mon.confusionTurns > 0)) {
     mon.itemConsumed = true;
     mon.status = "";
@@ -2349,6 +3564,7 @@ function maybeUseStatusCureItem(mon, incomingStatus) {
 function applyThresholdItem(mon) {
   const item = cleanText(mon.item);
   if (!item || mon.itemConsumed || mon.fainted || mon.hp <= 0 || mon.hp > Math.floor(mon.maxHp / 2)) return;
+  if (opposingActiveHasAbility(mon, "unnerve") && /Berry/i.test(item)) return;
   if (item === "Sitrus Berry") {
     mon.itemConsumed = true;
     healCombatant(mon, Math.max(1, Math.floor(mon.maxHp / 4)));
@@ -2368,20 +3584,56 @@ function calculateConfusionDamage(mon) {
   return Math.max(1, baseDamage);
 }
 
-function applyBoostChanges(mon, boosts) {
+function applyBoostChanges(mon, boosts, source = null, options = {}) {
+  const actual = [];
+  let loweredByOpponent = false;
   boosts.forEach((boost) => {
-    mon.boosts[boost.stat] = clamp(mon.boosts[boost.stat] + boost.change, -6, 6);
+    if (!boost || !BATTLE_STAGE_KEYS.includes(boost.stat) || !boost.change) return;
+    let change = boost.change;
+    const blockedByOpponent = change < 0 && source && !options.reflected && !isAbilitySuppressed(source, mon);
+    const monAbility = abilityId(mon);
+    if (blockedByOpponent && STAT_DROP_BLOCK_ABILITIES.has(monAbility)) {
+      appendBattleLog(mon.displayName, `${mon.ability || "Its ability"} blocked the stat drop.`);
+      return;
+    }
+    if (blockedByOpponent && monAbility === "mirrorarmor") {
+      appendBattleLog(mon.displayName, "reflected the stat drop with Mirror Armor.");
+      applyBoostChanges(source, [{ stat: boost.stat, change }], mon, { reflected: true });
+      return;
+    }
+    if (monAbility === "contrary") change *= -1;
+    if (monAbility === "simple") change *= 2;
+    const next = clamp(mon.boosts[boost.stat] + change, -6, 6);
+    const delta = next - mon.boosts[boost.stat];
+    if (!delta) return;
+    mon.boosts[boost.stat] = next;
+    if (source && delta < 0) loweredByOpponent = true;
+    actual.push({ stat: boost.stat, change: delta });
   });
+  if (source && loweredByOpponent && !options.reflected) {
+    const id = abilityId(mon);
+    if (id === "defiant") {
+      const triggered = applyBoostChanges(mon, [{ stat: "attack", change: 2 }], null, { reflected: true });
+      if (triggered.length) appendBattleLog(mon.displayName, "raised its Attack with Defiant.");
+    }
+    if (id === "competitive") {
+      const triggered = applyBoostChanges(mon, [{ stat: "spattack", change: 2 }], null, { reflected: true });
+      if (triggered.length) appendBattleLog(mon.displayName, "raised its Sp. Atk with Competitive.");
+    }
+  }
+  return actual;
 }
 
-function getBoostEffectChance(move) {
+function getBoostEffectChance(move, user = null) {
   if (!move.boosts?.length) return 0;
-  return move.statChance || 100;
+  const chance = move.statChance || 100;
+  return abilityId(user) === "serenegrace" ? Math.min(100, chance * 2) : chance;
 }
 
-function getAilmentEffectChance(move) {
+function getAilmentEffectChance(move, user = null) {
   if (!move.ailment || move.ailment === "none" || move.ailment === "unknown") return 0;
-  return move.ailmentChance || (move.damageClass === "status" ? 100 : 0);
+  const chance = move.ailmentChance || (move.damageClass === "status" ? 100 : 0);
+  return abilityId(user) === "serenegrace" ? Math.min(100, chance * 2) : chance;
 }
 
 function describeBoostChanges(boosts) {
