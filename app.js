@@ -24,6 +24,11 @@ const FORCE_SWITCH_MOVES = new Set(["roar", "whirlwind", "dragon-tail", "circle-
 const HAZARD_MOVES = new Set(["stealth-rock", "spikes", "toxic-spikes", "sticky-web"]);
 const SOUND_MOVE_KEYWORDS = ["voice", "song", "sound", "noise", "clang", "screech", "snarl", "roar", "hypervoice", "echoedvoice", "boomburst"];
 const BALL_BOMB_MOVE_KEYWORDS = ["ball", "bomb", "seed", "sphere", "egg", "pollen"];
+const BITE_MOVE_KEYWORDS = ["bite", "fang", "jaw", "crunch"];
+const PUNCH_MOVE_KEYWORDS = ["punch", "cometpunch", "machpunch", "meteormash", "bulletpunch"];
+const PULSE_MOVE_KEYWORDS = ["pulse", "aura-sphere", "origin-pulse", "dragon-pulse", "dark-pulse", "water-pulse"];
+const SLICING_MOVE_KEYWORDS = ["slash", "cut", "blade", "cleave", "scythe", "sword", "leafblade", "psyblade"];
+const WIND_MOVE_KEYWORDS = ["wind", "storm", "gust", "hurricane", "twister", "bleakwind", "springtide", "wildbolt"];
 const UNSWAPPABLE_ABILITIES = new Set([
   "multitype", "rkssystem", "schooling", "comatose", "disguise", "iceface", "powerconstruct", "battlebond",
   "zenmode", "shieldsdown", "forecast", "illusion", "trace", "imposter", "stancechange",
@@ -325,6 +330,7 @@ function loadSave(fileText, fileName) {
 
   let message = `Loaded ${state.speciesList.length} species and ${loaded.team.length} Team A slots from ${fileName}.`;
   if (loaded.ignoredMoves) message += ` Ignored ${loaded.ignoredMoves} unknown move${loaded.ignoredMoves === 1 ? "" : "s"}.`;
+  if (state.customAbilities.length) message += ` Loaded ${state.customAbilities.length} custom ability${state.customAbilities.length === 1 ? "" : "ies"}.`;
   setStatus(message);
 }
 
@@ -1554,6 +1560,9 @@ function buildCombatant(slot, rosterSlot) {
     disabledMove: "",
     disabledTurns: 0,
     perishCount: 0,
+    chargedMoveBoost: false,
+    angerShellTriggered: false,
+    slowStartTurns: cleanText(species.ability).toLowerCase().replace(/[^a-z0-9]+/g, "") === "slowstart" ? 5 : 0,
     originalSpeciesId: species.id,
     originalShowdownName: species.showdownName,
     currentForm: species.form || "Base",
@@ -1610,7 +1619,10 @@ function buildActionOrder() {
       return { sideKey, type: "switch", toIndex: action.toIndex, actionRank: 2, priority: 6, speed: getModifiedBattleStat(user, "speed") };
     }
     const moveSlot = user.moves[action.moveIndex];
-    const move = getBattleMove(moveSlot?.name);
+    const baseMove = getBattleMove(moveSlot?.name);
+    const move = baseMove ? { ...baseMove, originalType: baseMove.type, type: getMoveTypeForUse(user, baseMove) } : null;
+    applyCustomAbilityMoveUse(user, move, { opponent: getActiveCombatant(otherSideKey(sideKey)), move });
+    applyCustomAbilityPriorityTargeting(user, move, { opponent: getActiveCombatant(otherSideKey(sideKey)), move });
     const quickClaw = cleanText(user.item) === "Quick Claw" && !user.itemConsumed && Math.random() < 0.2;
     if (quickClaw) appendBattleLog(user.displayName, "Quick Claw let it act first.");
     const priorityBonus = getAbilityPriorityBonus(user, move);
@@ -1695,6 +1707,8 @@ function performMove(sideKey, moveIndex) {
   if ((isChoiceItem(user.item) || abilityId(user) === "gorillatactics") && !user.choiceLock) user.choiceLock = moveSlot.name;
   move.originalType = move.type;
   move.type = getMoveTypeForUse(user, move);
+  applyCustomAbilityMoveUse(user, move, { opponent: target, move });
+  applyCustomAbilityPriorityTargeting(user, move, { opponent: target, move });
   applyStanceChange(user, move);
   if (["protean", "libero"].includes(abilityId(user)) && move.type) {
     user.types = [move.type];
@@ -1825,6 +1839,7 @@ function performMove(sideKey, moveIndex) {
   }
 
   if (targetIsOpponent && totalDamage > 0 && !recipient.fainted) {
+    runCustomAbilityContactOnHit(recipient, user, move, totalDamage);
     applyDamageTakenAbilityEffects(user, recipient, move, totalDamage);
     applyItemTheftAbilities(user, recipient, move, totalDamage);
   }
@@ -1993,13 +2008,19 @@ function calculateMoveDamage(user, target, move, precomputedMultiplier) {
   const levelFactor = Math.floor((2 * user.level) / 5) + 2;
   const adjustedPower = Math.floor(getModifiedMovePower(user, target, move) * getMovePowerAbilityModifier(user, move));
   const baseDamage = Math.floor(Math.floor((levelFactor * adjustedPower * attack) / defense) / 50) + 2;
-  const crit = Math.random() < getCritChance(move, user);
+  const crit = (abilityId(user) === "merciless" && ["poison", "tox"].includes(target.status)) || Math.random() < getCritChance(move, user);
   const stab = user.types.includes(move.type) ? getStabModifier(user) : 1;
   const randomFactor = 0.85 + Math.random() * 0.15;
   let modifier = randomFactor * stab * typeMultiplier * getDamageItemModifier(user, move, typeMultiplier);
   modifier *= getWeatherPowerModifier(move);
+  modifier *= getCustomAbilityDamageModifier(user, move, "immunity-damage", typeMultiplier, "attacker");
+  modifier *= getCustomAbilityDamageModifier(target, move, "immunity-damage", typeMultiplier, "defender");
   modifier *= getOffensiveAbilityModifier(user, target, move, typeMultiplier);
   modifier *= getDefensiveAbilityModifier(user, target, move, typeMultiplier);
+  if (user.chargedMoveBoost && move.type === "Electric") {
+    modifier *= 2;
+    user.chargedMoveBoost = false;
+  }
   if (crit) modifier *= abilityId(user) === "sniper" ? 2 : 1.5;
   if (move.damageClass === "physical" && user.status === "burn" && abilityId(user) !== "guts") modifier *= 0.5;
   return {
@@ -2055,6 +2076,7 @@ function applyBattleDamage(target, damage, context) {
     target.protecting = false;
     appendBattleLog(target.displayName, "fainted.");
     applyAftermathAbility(context.attacker, target, context.move);
+    runCustomAbilityFaintReplacement(target, context);
     triggerFaintAbilities(target, context);
   }
   return actual;
@@ -2073,6 +2095,7 @@ function applyDirectDamage(mon, amount, sourceLabel) {
     mon.protecting = false;
     mon.flinched = false;
     appendBattleLog(mon.displayName, "fainted.");
+    runCustomAbilityFaintReplacement(mon, { sourceLabel });
     triggerFaintAbilities(mon, { sourceLabel });
   }
   return actual;
@@ -2129,6 +2152,7 @@ function resolveBeforeMoveStatus(mon, move) {
 function applyEndOfTurnEffects() {
   ["alpha", "beta"].forEach((sideKey) => {
     const mon = getActiveCombatant(sideKey);
+    const opponent = getActiveCombatant(otherSideKey(sideKey));
     if (!mon || mon.fainted) return;
     mon.protecting = false;
     mon.flinched = false;
@@ -2138,6 +2162,10 @@ function applyEndOfTurnEffects() {
       else applyDirectDamage(mon, mon.hp, "Perish Song");
     }
     if (mon.fainted) return;
+    if (mon.slowStartTurns > 0) {
+      mon.slowStartTurns -= 1;
+      if (mon.slowStartTurns === 0) appendBattleLog(mon.displayName, "finally got its act together.");
+    }
     if (mon.disabledTurns > 0) {
       mon.disabledTurns -= 1;
       if (mon.disabledTurns <= 0) {
@@ -2221,6 +2249,8 @@ function applyEndOfTurnEffects() {
     if (cleanText(mon.item) === "Toxic Orb" && !mon.itemConsumed && !mon.status) {
       if (inflictMajorStatus(mon, "tox")) appendBattleLog(mon.displayName, "was badly poisoned by Toxic Orb.");
     }
+    runCustomAbilityEvent(mon, "end-of-turn", { opponent });
+    runCustomAbilityEvent(mon, "weather-terrain", { opponent });
     refreshBattleFormState(mon);
   });
   tickFieldDurations();
@@ -2576,6 +2606,8 @@ function getModifiedBattleStatWithStage(mon, statKey, stage, move) {
   value *= getStatStageMultiplier(stage || 0);
   if (statKey === "attack" && ["hugepower", "purepower"].includes(abilityId(mon))) value *= 2;
   if (statKey === "attack" && abilityId(mon) === "gorillatactics") value *= 1.5;
+  if (statKey === "attack" && abilityId(mon) === "slowstart" && mon.slowStartTurns > 0) value *= 0.5;
+  if (statKey === "speed" && abilityId(mon) === "slowstart" && mon.slowStartTurns > 0) value *= 0.5;
   if (statKey === "speed" && getActiveWeather() === "rain" && abilityId(mon) === "swiftswim") value *= 2;
   if (statKey === "speed" && getActiveWeather() === "sun" && abilityId(mon) === "chlorophyll") value *= 2;
   if (statKey === "speed" && getActiveWeather() === "sand" && abilityId(mon) === "sandrush") value *= 2;
@@ -2780,6 +2812,31 @@ function isBallOrBombMove(move) {
   return BALL_BOMB_MOVE_KEYWORDS.some((keyword) => id.includes(keyword));
 }
 
+function moveIdMatches(move, keywords) {
+  const id = move?.id || "";
+  return keywords.some((keyword) => id.includes(keyword));
+}
+
+function isBiteMove(move) {
+  return moveIdMatches(move, BITE_MOVE_KEYWORDS);
+}
+
+function isPunchMove(move) {
+  return moveIdMatches(move, PUNCH_MOVE_KEYWORDS);
+}
+
+function isPulseMove(move) {
+  return moveIdMatches(move, PULSE_MOVE_KEYWORDS);
+}
+
+function isSlicingMove(move) {
+  return moveIdMatches(move, SLICING_MOVE_KEYWORDS);
+}
+
+function isWindMove(move) {
+  return moveIdMatches(move, WIND_MOVE_KEYWORDS);
+}
+
 function getMoveTypeForUse(user, move) {
   if (!move) return "";
   const id = abilityId(user);
@@ -2916,6 +2973,19 @@ function applyCustomAbilityStatus(target, modifier, source) {
 function applyCustomAbilityModifier(mon, modifier, context = {}) {
   const target = resolveAbilityModifierTarget(mon, modifier, context);
   if (!target) return false;
+  if (modifier.action === "replace-on-faint") {
+    if (modifier.targeting === "self") {
+      const sideKey = getBattleSideForMon(mon);
+      if (sideKey) forceSwitch(sideKey);
+      return true;
+    }
+    if (modifier.targeting === "random-opponent" || modifier.targeting === "all-opponents") {
+      const sideKey = getBattleSideForMon(mon);
+      if (sideKey) forceSwitch(otherSideKey(sideKey));
+      return true;
+    }
+    return false;
+  }
   if (modifier.action === "raise-stat" || modifier.action === "lower-stat") {
     if (!target.boosts) return false;
     const change = modifier.action === "raise-stat" ? modifier.stages : -modifier.stages;
@@ -2972,6 +3042,39 @@ function runCustomAbilityEvent(mon, eventName, context = {}) {
     });
 }
 
+function runCustomAbilityContactOnHit(defender, attacker, move, totalDamage) {
+  if (!defender || !attacker || defender.fainted || !isContactMove(move)) return;
+  runCustomAbilityEvent(defender, "contact-on-hit", {
+    attacker,
+    opponent: attacker,
+    target: attacker,
+    move,
+    totalDamage,
+  });
+}
+
+function runCustomAbilityFaintReplacement(faintedMon, source = {}) {
+  const attacker = source.attacker;
+  if (attacker && attacker !== faintedMon && !attacker.fainted) {
+    runCustomAbilityEvent(attacker, "faint-replacement", {
+      target: faintedMon,
+      opponent: faintedMon,
+      attacker,
+      move: source.move,
+    });
+  }
+  ["alpha", "beta"].forEach((sideKey) => {
+    const active = getActiveCombatant(sideKey);
+    if (!active || active === faintedMon || active.fainted || active === attacker) return;
+    runCustomAbilityEvent(active, "faint-replacement", {
+      target: faintedMon,
+      opponent: faintedMon,
+      attacker,
+      move: source.move,
+    });
+  });
+}
+
 function applyCustomAbilityMoveUse(mon, move, context = {}) {
   const ability = getCustomAbility(mon);
   if (!ability?.modifiers?.length || !move) return;
@@ -2988,27 +3091,41 @@ function applyCustomAbilityMoveUse(mon, move, context = {}) {
     });
 }
 
+function applyCustomAbilityPriorityTargeting(mon, move, context = {}) {
+  const ability = getCustomAbility(mon);
+  if (!ability?.modifiers?.length || !move) return;
+  ability.modifiers
+    .filter((modifier) => modifier.event === "priority-targeting" && modifier.action === "retarget-move")
+    .forEach((modifier) => {
+      if (!matchesAbilityModifierChance(modifier)) return;
+      if (modifier.targeting === "self") move.target = "user";
+      if (["normal", "random-opponent", "all-opponents", "all-adjacent"].includes(modifier.targeting)) move.target = "selected-pokemon";
+    });
+}
+
 function getCustomAbilityPriorityBonus(mon) {
   const ability = getCustomAbility(mon);
   if (!ability?.modifiers?.length) return 0;
   return ability.modifiers
     .filter((modifier) => modifier.event === "priority-targeting" && modifier.action === "modify-priority")
+    .filter((modifier) => matchesAbilityModifierChance(modifier))
     .reduce((total, modifier) => total + (safeNumber(modifier.priority) || 0), 0);
 }
 
-function getCustomAbilityDamageModifier(mon, move, eventName, typeMultiplier = 1) {
+function getCustomAbilityDamageModifier(mon, move, eventName, typeMultiplier = 1, role = "attacker") {
   const ability = getCustomAbility(mon);
   if (!ability?.modifiers?.length || !move) return 1;
   return ability.modifiers
     .filter((modifier) => modifier.event === eventName)
+    .filter((modifier) => matchesAbilityModifierChance(modifier))
     .reduce((modifierTotal, modifier) => {
-      if (modifier.action === "boost-type-damage" && move.type === modifier.type) {
+      if (role === "attacker" && modifier.action === "boost-type-damage" && move.type === modifier.type) {
         return modifierTotal * (1 + (modifier.amount / 100));
       }
-      if (modifier.action === "reduce-type-damage" && move.type === modifier.type) {
+      if (role === "defender" && modifier.action === "reduce-type-damage" && move.type === modifier.type) {
         return modifierTotal * Math.max(0, 1 - (modifier.amount / 100));
       }
-      if (modifier.action === "boost-type-damage" && modifier.type === "All" && typeMultiplier > 1) {
+      if (role === "attacker" && modifier.action === "boost-type-damage" && modifier.type === "All" && typeMultiplier > 1) {
         return modifierTotal * (1 + (modifier.amount / 100));
       }
       return modifierTotal;
@@ -3018,7 +3135,12 @@ function getCustomAbilityDamageModifier(mon, move, eventName, typeMultiplier = 1
 function handleCustomAbilityMoveImmunity(attacker, defender, move) {
   const ability = getCustomAbility(defender);
   if (!ability?.modifiers?.length || !move) return false;
-  const immunity = ability.modifiers.find((modifier) => modifier.event === "immunity-damage" && modifier.action === "grant-immunity" && modifier.type === move.type);
+  const immunity = ability.modifiers.find((modifier) => (
+    modifier.event === "immunity-damage"
+    && modifier.action === "grant-immunity"
+    && modifier.type === move.type
+    && matchesAbilityModifierChance(modifier)
+  ));
   if (!immunity) return false;
   appendBattleLog(defender.displayName, `is immune to ${move.type}-type moves because of ${defender.ability}.`);
   return true;
@@ -3035,6 +3157,12 @@ function opposingActiveHasAbility(mon, abilityName) {
   if (!sideKey) return false;
   const foe = getActiveCombatant(otherSideKey(sideKey));
   return Boolean(foe && !foe.fainted && abilityId(foe) === toId(abilityName));
+}
+
+function countFaintedTeammates(mon) {
+  const sideKey = getBattleSideForMon(mon);
+  if (!sideKey) return 0;
+  return state.battle.teams[sideKey].combatants.filter((teammate) => teammate !== mon && teammate.fainted).length;
 }
 
 function triggerBoostAbility(mon, boosts, text) {
@@ -3103,16 +3231,32 @@ function getStabModifier(user) {
 function getOffensiveAbilityModifier(user, target, move, typeMultiplier) {
   const id = abilityId(user);
   let modifier = 1;
+  if (id === "defeatist" && user.hp <= Math.floor(user.maxHp / 2) && (move.damageClass === "physical" || move.damageClass === "special")) modifier *= 0.5;
   if (id === "blaze" && move.type === "Fire" && user.hp <= Math.floor(user.maxHp / 3)) modifier *= 1.5;
   if (id === "torrent" && move.type === "Water" && user.hp <= Math.floor(user.maxHp / 3)) modifier *= 1.5;
   if (id === "overgrow" && move.type === "Grass" && user.hp <= Math.floor(user.maxHp / 3)) modifier *= 1.5;
   if (id === "swarm" && move.type === "Bug" && user.hp <= Math.floor(user.maxHp / 3)) modifier *= 1.5;
   if (id === "guts" && move.damageClass === "physical" && user.status) modifier *= 1.5;
+  if (id === "toxicboost" && move.damageClass === "physical" && (user.status === "poison" || user.status === "tox")) modifier *= 1.5;
+  if (id === "flareboost" && move.damageClass === "special" && user.status === "burn") modifier *= 1.5;
   if (id === "flashfire" && user.flashFireBoost && move.type === "Fire") modifier *= 1.5;
   if (id === "waterbubble" && move.type === "Water") modifier *= 2;
   if (id === "tintedlens" && typeMultiplier > 0 && typeMultiplier < 1) modifier *= 2;
   if (id === "solarpower" && getActiveWeather() === "sun" && move.damageClass === "special") modifier *= 1.5;
   if (id === "sheerforce" && move.damageClass !== "status" && moveHasSecondaryEffects(move)) modifier *= 1.3;
+  if (id === "strongjaw" && isBiteMove(move)) modifier *= 1.5;
+  if (id === "ironfist" && isPunchMove(move)) modifier *= 1.2;
+  if (id === "megalauncher" && isPulseMove(move)) modifier *= 1.5;
+  if (id === "sharpness" && isSlicingMove(move)) modifier *= 1.5;
+  if (id === "toughclaws" && isContactMove(move)) modifier *= 1.3;
+  if (id === "punkrock" && isSoundMove(move)) modifier *= 1.3;
+  if (id === "rockypayload" && move.type === "Rock") modifier *= 1.5;
+  if (id === "steelworker" && move.type === "Steel") modifier *= 1.5;
+  if (id === "transistor" && move.type === "Electric") modifier *= 1.3;
+  if (id === "dragonsmaw" && move.type === "Dragon") modifier *= 1.5;
+  if (id === "neuroforce" && typeMultiplier > 1) modifier *= 1.25;
+  if (id === "reckless" && move.drain < 0) modifier *= 1.2;
+  if (id === "supremeoverlord") modifier *= 1 + Math.min(5, countFaintedTeammates(user)) * 0.1;
   return modifier;
 }
 
@@ -3130,6 +3274,7 @@ function getDefensiveAbilityModifier(attacker, defender, move, typeMultiplier) {
   if (id === "marvelscale" && move.damageClass === "physical" && defender.status) modifier *= (2 / 3);
   if (id === "waterbubble" && move.type === "Fire") modifier *= 0.5;
   if (id === "dryskin" && move.type === "Fire") modifier *= 1.25;
+  if (id === "punkrock" && isSoundMove(move)) modifier *= 0.5;
   if (id === "fluffy") {
     if (move.type === "Fire") modifier *= 2;
     else if (isContactMove(move)) modifier *= 0.5;
@@ -3139,6 +3284,7 @@ function getDefensiveAbilityModifier(attacker, defender, move, typeMultiplier) {
 
 function handleAbilityMoveImmunity(attacker, defender, move) {
   if (!defender || !move || isAbilitySuppressed(attacker, defender)) return false;
+  if (handleCustomAbilityMoveImmunity(attacker, defender, move)) return true;
   const id = getActualAbilityId(defender);
   if (id === "soundproof" && isSoundMove(move)) {
     appendBattleLog(defender.displayName, "ignored the sound move with Soundproof.");
@@ -3146,6 +3292,11 @@ function handleAbilityMoveImmunity(attacker, defender, move) {
   }
   if (id === "bulletproof" && isBallOrBombMove(move)) {
     appendBattleLog(defender.displayName, "blocked the projectile move with Bulletproof.");
+    return true;
+  }
+  if (id === "windrider" && isWindMove(move)) {
+    triggerBoostAbility(defender, [{ stat: "attack", change: 1 }], "raised its Attack with Wind Rider.");
+    appendBattleLog(defender.displayName, "ignored the wind move with Wind Rider.");
     return true;
   }
   if (id === "levitate" && move.type === "Ground") {
@@ -3327,9 +3478,32 @@ function applyDamageTakenAbilityEffects(attacker, defender, move) {
     defender.berserkTriggered = true;
     triggerBoostAbility(defender, [{ stat: "spattack", change: 1 }], "raised its Sp. Atk with Berserk.");
   }
+  if (id === "angershell" && defender.hp > 0 && defender.hp <= Math.floor(defender.maxHp / 2) && !defender.angerShellTriggered) {
+    defender.angerShellTriggered = true;
+    const applied = [
+      ...applyBoostChanges(defender, [{ stat: "attack", change: 1 }, { stat: "spattack", change: 1 }, { stat: "speed", change: 1 }]),
+      ...applyBoostChanges(defender, [{ stat: "defense", change: -1 }, { stat: "spdefense", change: -1 }], attacker),
+    ];
+    if (applied.length) appendBattleLog(defender.displayName, "changed its stats with Anger Shell.");
+  }
   if (id === "colorchange" && move.type && defender.types[0] !== move.type) {
     defender.types = [move.type];
     appendBattleLog(defender.displayName, `changed type to ${move.type} with Color Change.`);
+  }
+  if (id === "electromorphosis" && !defender.chargedMoveBoost) {
+    defender.chargedMoveBoost = true;
+    appendBattleLog(defender.displayName, "became charged with Electromorphosis.");
+  }
+  if (id === "windpower" && isWindMove(move) && !defender.chargedMoveBoost) {
+    defender.chargedMoveBoost = true;
+    appendBattleLog(defender.displayName, "became charged with Wind Power.");
+  }
+  if (id === "thermalexchange" && move.type === "Fire") {
+    triggerBoostAbility(defender, [{ stat: "attack", change: 1 }], "raised its Attack with Thermal Exchange.");
+  }
+  if (id === "toxicdebris" && move.damageClass === "physical") {
+    const sideKey = getBattleSideForMon(attacker);
+    if (sideKey && placeHazard(sideKey, "toxic-spikes")) appendBattleLog(defender.displayName, "scattered Toxic Spikes with Toxic Debris.");
   }
   if (id === "cursedbody" && attacker.lastMoveUsed && Math.random() < 0.3) {
     attacker.disabledMove = attacker.lastMoveUsed;
@@ -3464,6 +3638,7 @@ function applyEntryHazards(sideKey) {
 
 function applySwitchOutAbilities(mon) {
   const id = getActualAbilityId(mon);
+  runCustomAbilityEvent(mon, "switch-out", { opponent: getActiveCombatant(otherSideKey(getBattleSideForMon(mon))) });
   if (id === "naturalcure" && (mon.status || mon.confusionTurns > 0)) {
     mon.status = "";
     mon.statusTurns = 0;
@@ -3486,6 +3661,8 @@ function applySwitchInAbilities(sideKey, mode) {
   const foe = getActiveCombatant(otherSideKey(sideKey));
   if (!mon || mon.fainted) return;
   const id = getActualAbilityId(mon);
+  runCustomAbilityEvent(mon, "switch-in", { opponent: foe });
+  runCustomAbilityEvent(mon, "weather-terrain", { opponent: foe });
   if (id === "intimidate" && foe && !foe.fainted && hasActiveAbility(mon, "intimidate")) {
     const applied = applyBoostChanges(foe, [{ stat: "attack", change: -1 }], mon);
     if (applied.length) appendBattleLog(mon.displayName, `lowered ${foe.displayName}'s Attack with Intimidate.`);
@@ -3520,7 +3697,7 @@ function inflictMajorStatus(mon, status, move = {}) {
   if (mon.fainted || mon.status) return false;
   if (!canReceiveStatus(mon, status, move.source)) return false;
   if (status === "burn" && mon.types.includes("Fire")) return false;
-  if ((status === "poison" || status === "tox") && (mon.types.includes("Poison") || mon.types.includes("Steel"))) return false;
+  if ((status === "poison" || status === "tox") && abilityId(move.source) !== "corrosion" && (mon.types.includes("Poison") || mon.types.includes("Steel"))) return false;
   if (status === "freeze" && mon.types.includes("Ice")) return false;
   if (status === "paralysis" && mon.types.includes("Electric")) return false;
   mon.status = status;
