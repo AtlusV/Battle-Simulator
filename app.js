@@ -22,6 +22,28 @@ const CLEAR_ALL_BOOST_MOVES = new Set(["haze"]);
 const CLEAR_TARGET_BOOST_MOVES = new Set(["clear-smog"]);
 const FORCE_SWITCH_MOVES = new Set(["roar", "whirlwind", "dragon-tail", "circle-throw"]);
 const HAZARD_MOVES = new Set(["stealth-rock", "spikes", "toxic-spikes", "sticky-web"]);
+const TWO_TURN_MOVE_MESSAGES = {
+  "bounce": "sprang up.",
+  "dig": "dug underground.",
+  "dive": "dove underwater.",
+  "electro-shot": "absorbed electricity.",
+  "fly": "flew up high.",
+  "geomancy": "began charging its power.",
+  "meteor-beam": "gathered space power.",
+  "phantom-force": "vanished instantly.",
+  "razor-wind": "whipped up a whirlwind.",
+  "shadow-force": "vanished instantly.",
+  "skull-bash": "tucked in its head.",
+  "sky-attack": "became cloaked in a harsh light.",
+  "solar-beam": "absorbed light.",
+  "solar-blade": "absorbed light.",
+};
+const TWO_TURN_MOVE_IDS = new Set(Object.keys(TWO_TURN_MOVE_MESSAGES));
+const CHARGING_STAT_BOOSTS = {
+  "electro-shot": [{ stat: "spattack", change: 1 }],
+  "meteor-beam": [{ stat: "spattack", change: 1 }],
+  "skull-bash": [{ stat: "defense", change: 1 }],
+};
 const SOUND_MOVE_KEYWORDS = ["voice", "song", "sound", "noise", "clang", "screech", "snarl", "roar", "hypervoice", "echoedvoice", "boomburst"];
 const BALL_BOMB_MOVE_KEYWORDS = ["ball", "bomb", "seed", "sphere", "egg", "pollen"];
 const BITE_MOVE_KEYWORDS = ["bite", "fang", "jaw", "crunch"];
@@ -29,6 +51,7 @@ const PUNCH_MOVE_KEYWORDS = ["punch", "cometpunch", "machpunch", "meteormash", "
 const PULSE_MOVE_KEYWORDS = ["pulse", "aura-sphere", "origin-pulse", "dragon-pulse", "dark-pulse", "water-pulse"];
 const SLICING_MOVE_KEYWORDS = ["slash", "cut", "blade", "cleave", "scythe", "sword", "leafblade", "psyblade"];
 const WIND_MOVE_KEYWORDS = ["wind", "storm", "gust", "hurricane", "twister", "bleakwind", "springtide", "wildbolt"];
+const POWDER_MOVE_KEYWORDS = ["powder", "spore", "cotton-spore", "rage-powder", "sleep-powder", "stun-spore"];
 const UNSWAPPABLE_ABILITIES = new Set([
   "multitype", "rkssystem", "schooling", "comatose", "disguise", "iceface", "powerconstruct", "battlebond",
   "zenmode", "shieldsdown", "forecast", "illusion", "trace", "imposter", "stancechange",
@@ -44,13 +67,33 @@ const TYPE_BOOST_ITEMS = {
   "Spell Tag": "Ghost", "Dragon Fang": "Dragon", "Black Glasses": "Dark", "Metal Coat": "Steel", "Pixie Plate": "Fairy",
 };
 
+const PLATE_TYPE_ITEMS = {
+  "Flame Plate": "Fire", "Splash Plate": "Water", "Zap Plate": "Electric", "Meadow Plate": "Grass",
+  "Icicle Plate": "Ice", "Fist Plate": "Fighting", "Toxic Plate": "Poison", "Earth Plate": "Ground",
+  "Sky Plate": "Flying", "Mind Plate": "Psychic", "Insect Plate": "Bug", "Stone Plate": "Rock",
+  "Spooky Plate": "Ghost", "Draco Plate": "Dragon", "Dread Plate": "Dark", "Iron Plate": "Steel", "Pixie Plate": "Fairy",
+};
+
+const MEMORY_TYPE_ITEMS = {
+  "Fire Memory": "Fire", "Water Memory": "Water", "Electric Memory": "Electric", "Grass Memory": "Grass",
+  "Ice Memory": "Ice", "Fighting Memory": "Fighting", "Poison Memory": "Poison", "Ground Memory": "Ground",
+  "Flying Memory": "Flying", "Psychic Memory": "Psychic", "Bug Memory": "Bug", "Rock Memory": "Rock",
+  "Ghost Memory": "Ghost", "Dragon Memory": "Dragon", "Dark Memory": "Dark", "Steel Memory": "Steel", "Fairy Memory": "Fairy",
+};
+
 const ITEM_CATALOG = [
   "Leftovers", "Black Sludge", "Sitrus Berry", "Oran Berry", "Lum Berry", "Chesto Berry", "Life Orb", "Focus Sash",
+  "Figy Berry", "Wiki Berry", "Mago Berry", "Aguav Berry", "Iapapa Berry",
   "Rocky Helmet", "Shell Bell", "Expert Belt", "Choice Band", "Choice Specs", "Choice Scarf", "Assault Vest",
-  "Air Balloon", "Weakness Policy", "Quick Claw", "Scope Lens", "King's Rock", "Razor Fang", "Flame Orb", "Toxic Orb",
+  "Air Balloon", "Weakness Policy", "Power Herb", "Quick Claw", "Scope Lens", "King's Rock", "Razor Fang", "Flame Orb", "Toxic Orb",
   "Muscle Band", "Wise Glasses", "Silk Scarf", "Charcoal", "Mystic Water", "Magnet", "Miracle Seed", "Never-Melt Ice",
   "Black Belt", "Poison Barb", "Soft Sand", "Sharp Beak", "Twisted Spoon", "Silver Powder", "Hard Stone",
   "Spell Tag", "Dragon Fang", "Black Glasses", "Metal Coat", "Pixie Plate",
+  "Flame Plate", "Splash Plate", "Zap Plate", "Meadow Plate", "Icicle Plate", "Fist Plate", "Toxic Plate", "Earth Plate",
+  "Sky Plate", "Mind Plate", "Insect Plate", "Stone Plate", "Spooky Plate", "Draco Plate", "Dread Plate", "Iron Plate",
+  "Fire Memory", "Water Memory", "Electric Memory", "Grass Memory", "Ice Memory", "Fighting Memory", "Poison Memory",
+  "Ground Memory", "Flying Memory", "Psychic Memory", "Bug Memory", "Rock Memory", "Ghost Memory", "Dragon Memory",
+  "Dark Memory", "Steel Memory", "Fairy Memory",
 ];
 
 const FIXED_DAMAGE_MOVES = {
@@ -153,6 +196,7 @@ const state = {
     alpha: createRosterState("alpha", "Team A", true),
     beta: createRosterState("beta", "Team B", false),
   },
+  battleMode: "singles",
   battle: createEmptyBattleState(),
 };
 
@@ -189,6 +233,7 @@ function cacheDom() {
   dom.cloneTeamButton = document.getElementById("clone-team-button");
   dom.clearOpponentButton = document.getElementById("clear-opponent-button");
   dom.startBattleButton = document.getElementById("start-battle-button");
+  dom.battleModeButton = document.getElementById("battle-mode-button");
   dom.resolveTurnButton = document.getElementById("resolve-turn-button");
   dom.resetBattleButton = document.getElementById("reset-battle-button");
   dom.statusText = document.getElementById("status-text");
@@ -231,6 +276,7 @@ function bindEvents() {
   dom.cloneTeamButton.addEventListener("click", cloneAlphaToBeta);
   dom.clearOpponentButton.addEventListener("click", clearBetaRoster);
   dom.startBattleButton.addEventListener("click", startBattle);
+  dom.battleModeButton.addEventListener("click", toggleBattleMode);
   dom.resolveTurnButton.addEventListener("click", resolveBattleTurn);
   dom.resetBattleButton.addEventListener("click", resetBattle);
 
@@ -848,12 +894,12 @@ function handleDexDetailClick(event) {
 function handleBattleSideClick(event) {
   const moveButton = event.target.closest(".battle-move-button[data-side][data-move]");
   if (moveButton) {
-    setBattleAction(moveButton.dataset.side, { type: "move", moveIndex: Number(moveButton.dataset.move) });
+    setBattleAction(moveButton.dataset.side, { type: "move", moveIndex: Number(moveButton.dataset.move), userIndex: Number(moveButton.dataset.user) });
     return;
   }
   const switchButton = event.target.closest(".battle-switch-button[data-side][data-switch]");
   if (switchButton) {
-    setBattleAction(switchButton.dataset.side, { type: "switch", toIndex: Number(switchButton.dataset.switch) });
+    setBattleAction(switchButton.dataset.side, { type: "switch", toIndex: Number(switchButton.dataset.switch), userIndex: Number(switchButton.dataset.user) });
   }
 }
 
@@ -1326,13 +1372,24 @@ function startBattle() {
   state.battle = {
     ...createEmptyBattleState(),
     started: true,
+    mode: state.battleMode,
     teams: { alpha: alphaTeam, beta: betaTeam },
     log: [{ title: "Battle started", text: `${alphaTeam.label} and ${betaTeam.label} entered the arena.`, turnMarker: false }],
   };
-  applySwitchInAbilities("alpha", "lead");
-  applySwitchInAbilities("beta", "lead");
+  getActiveCombatants("alpha").forEach((mon) => applySwitchInAbilities("alpha", "lead", mon));
+  getActiveCombatants("beta").forEach((mon) => applySwitchInAbilities("beta", "lead", mon));
   renderBattle();
-  setStatus("Started a local battle between Team A and Team B.");
+  setStatus(`Started a local ${state.battleMode === "doubles" ? "double" : "single"} battle between Team A and Team B.`);
+}
+
+function toggleBattleMode() {
+  if (state.battle.started) {
+    setStatus("Reset the current battle before changing battle mode.");
+    return;
+  }
+  state.battleMode = state.battleMode === "doubles" ? "singles" : "doubles";
+  renderBattle();
+  setStatus(`Battle mode set to ${state.battleMode === "doubles" ? "Doubles" : "Singles"}.`);
 }
 
 function resetBattle() {
@@ -1342,19 +1399,23 @@ function resetBattle() {
 
 function setBattleAction(sideKey, action) {
   if (!state.battle.started || state.battle.winner) return;
-  const validation = action.type === "move" ? canSelectBattleMove(sideKey, action.moveIndex) : canSelectBattleSwitch(sideKey, action.toIndex);
+  const userIndex = typeof action.userIndex === "number" ? action.userIndex : getPrimaryActiveIndex(sideKey);
+  const validation = action.type === "move" ? canSelectBattleMove(sideKey, action.moveIndex, userIndex) : canSelectBattleSwitch(sideKey, action.toIndex, userIndex);
   if (!validation.ok) {
     appendBattleLog("Action blocked", validation.message || "That action is not available.");
     renderBattle();
     return;
   }
-  state.battle.pendingActions[sideKey] = action;
+  state.battle.pendingActions[sideKey][userIndex] = { ...action, userIndex };
   renderBattle();
+  if (areAllBattleActionsQueued()) {
+    window.setTimeout(resolveBattleTurn, 0);
+  }
 }
 
 function resolveBattleTurn() {
   const battle = state.battle;
-  if (!battle.started || battle.winner || !battle.pendingActions.alpha || !battle.pendingActions.beta) return;
+  if (!battle.started || battle.winner || !areAllBattleActionsQueued()) return;
   battle.turn += 1;
   appendBattleLog(`Turn ${battle.turn}`, "Actions are resolving.", true);
   buildActionOrder().forEach((action) => {
@@ -1367,14 +1428,15 @@ function resolveBattleTurn() {
     autoReplaceFainted("beta");
     setBattleWinnerIfNeeded();
   }
-  battle.pendingActions.alpha = null;
-  battle.pendingActions.beta = null;
+  battle.pendingActions.alpha = {};
+  battle.pendingActions.beta = {};
   renderBattle();
 }
 
 function renderBattle() {
   const battle = state.battle;
-  dom.resolveTurnButton.disabled = !battle.started || Boolean(battle.winner) || !battle.pendingActions.alpha || !battle.pendingActions.beta;
+  if (dom.battleModeButton) dom.battleModeButton.textContent = `Mode: ${state.battleMode === "doubles" ? "Doubles" : "Singles"}`;
+  dom.resolveTurnButton.disabled = true;
   if (!battle.started) {
     dom.battleStatus.textContent = "Build Team A and Team B, then start a battle.";
     dom.battleTurn.textContent = "Turn 0";
@@ -1387,7 +1449,7 @@ function renderBattle() {
 
   dom.battleStatus.textContent = battle.winner
     ? (battle.winner === "draw" ? "The battle ended in a draw." : `${battle.teams[battle.winner].label} won the battle.`)
-    : "Choose one action for each side, then resolve the turn.";
+    : `Choose one action for each active battler. The ${battle.mode === "doubles" ? "double" : "single"} battle resolves automatically once everyone is queued.`;
   const fieldState = [
     battle.weather && `Weather: ${normalizeWeatherLabel(battle.weather)}`,
     battle.terrain && `Terrain: ${normalizeTerrainLabel(battle.terrain)}`,
@@ -1434,14 +1496,19 @@ function renderBattlePreview(sideKey) {
 
 function renderBattleSide(sideKey) {
   const team = state.battle.teams[sideKey];
-  const active = getActiveCombatant(sideKey);
-  if (!team || !active) return '<div class="empty-state battle-panel-block"><p>No active battler.</p></div>';
+  const activeIndexes = getActiveIndexes(sideKey);
+  if (!team || !activeIndexes.length) return '<div class="empty-state battle-panel-block"><p>No active battler.</p></div>';
+  return activeIndexes.map((activeIndex, slotIndex) => renderBattleActiveCard(sideKey, activeIndex, slotIndex)).join("");
+}
 
-  const pending = state.battle.pendingActions[sideKey];
+function renderBattleActiveCard(sideKey, activeIndex, slotIndex) {
+  const team = state.battle.teams[sideKey];
+  const active = team.combatants[activeIndex];
+  const pending = state.battle.pendingActions[sideKey]?.[activeIndex];
   const reserveCards = team.combatants.map((mon, index) => {
-    const valid = canSelectBattleSwitch(sideKey, index);
+    const valid = canSelectBattleSwitch(sideKey, index, activeIndex);
     return `
-      <button class="battle-choice battle-switch-button${index === team.active ? " active" : ""}" type="button" data-side="${sideKey}" data-switch="${index}"${valid.ok ? "" : " disabled"}>
+      <button class="battle-choice battle-switch-button${getActiveIndexes(sideKey).includes(index) ? " active" : ""}" type="button" data-side="${sideKey}" data-user="${activeIndex}" data-switch="${index}"${valid.ok ? "" : " disabled"}>
         <strong>${escapeHtml(mon.displayName)}</strong>
         <small>${escapeHtml(mon.fainted ? "Fainted" : `${mon.hp}/${mon.maxHp} HP`)}${mon.item ? ` | ${escapeHtml(getBattleItemLabel(mon))}` : ""}</small>
       </button>
@@ -1450,9 +1517,9 @@ function renderBattleSide(sideKey) {
 
   const moveCards = active.moves.map((moveSlot, index) => {
     const move = getBattleMove(moveSlot.name);
-    const valid = canSelectBattleMove(sideKey, index);
+    const valid = canSelectBattleMove(sideKey, index, activeIndex);
     return `
-      <button class="battle-choice battle-move-button${pending?.type === "move" && pending.moveIndex === index ? " active" : ""}" type="button" data-side="${sideKey}" data-move="${index}"${valid.ok ? "" : " disabled"}>
+      <button class="battle-choice battle-move-button${pending?.type === "move" && pending.moveIndex === index ? " active" : ""}" type="button" data-side="${sideKey}" data-user="${activeIndex}" data-move="${index}"${valid.ok ? "" : " disabled"}>
         <strong>${escapeHtml(moveSlot.name)}</strong>
         <small>${escapeHtml(buildMoveSummary(move, moveSlot))}</small>
       </button>
@@ -1462,13 +1529,13 @@ function renderBattleSide(sideKey) {
   return `
     <div class="battle-active-card">
       <div class="battle-side-head">
-        <strong>${escapeHtml(team.label)}</strong>
+        <strong>${escapeHtml(`${team.label}${isDoubleBattle() ? ` Slot ${slotIndex + 1}` : ""}`)}</strong>
         <span class="team-badge${sideKey === "beta" ? " secondary" : ""}">${escapeHtml(pending ? describePendingAction(sideKey, pending) : "Awaiting action")}</span>
       </div>
       <div class="battle-art">${renderBattleImage(active)}</div>
       <div>
         <h3 class="battle-card-title">${escapeHtml(active.displayName)}</h3>
-        <p class="battle-card-subtitle">Level ${escapeHtml(String(active.level))}${active.item ? ` | ${escapeHtml(getBattleItemLabel(active))}` : ""}${active.ability ? ` | ${escapeHtml(active.ability)}` : ""}</p>
+        <p class="battle-card-subtitle">Level ${escapeHtml(String(active.level))}${active.item ? ` | ${escapeHtml(getBattleItemLabel(active))}` : ""}${active.ability ? ` | ${escapeHtml(active.ability)}` : ""}${getCombatantFormLabel(active) ? ` | ${escapeHtml(getCombatantFormLabel(active))}` : ""}</p>
         <div class="chip-row">${active.types.map(renderTypeChip).join("")}</div>
         <div class="battle-meta-row">${renderStatusChips(active)}</div>
       </div>
@@ -1487,8 +1554,11 @@ function renderBattleSide(sideKey) {
 }
 
 function renderPendingActions() {
-  return renderPendingCard("Team A", state.battle.pendingActions.alpha ? describePendingAction("alpha", state.battle.pendingActions.alpha) : "No action queued.")
-    + renderPendingCard("Team B", state.battle.pendingActions.beta ? describePendingAction("beta", state.battle.pendingActions.beta) : "No action queued.");
+  return ["alpha", "beta"].flatMap((sideKey) => getActiveIndexes(sideKey).map((activeIndex, slotIndex) => {
+    const label = `${state.battle.teams[sideKey]?.label || sideKey}${isDoubleBattle() ? ` Slot ${slotIndex + 1}` : ""}`;
+    const action = state.battle.pendingActions[sideKey]?.[activeIndex];
+    return renderPendingCard(label, action ? describePendingAction(sideKey, action) : "No action queued.");
+  })).join("");
 }
 
 function renderPendingCard(label, text) {
@@ -1499,7 +1569,7 @@ function buildBattleTeam(sideKey) {
   const roster = state.rosters[sideKey];
   const combatants = roster.team.map((slot, rosterSlot) => buildCombatant(slot, rosterSlot)).filter(Boolean);
   if (!combatants.length) return null;
-  return { sideKey, label: roster.label, active: 0, combatants };
+  return { sideKey, label: roster.label, active: state.battleMode === "doubles" ? combatants.slice(0, 2).map((_, index) => index) : 0, combatants };
 }
 
 function buildCombatant(slot, rosterSlot) {
@@ -1545,6 +1615,7 @@ function buildCombatant(slot, rosterSlot) {
     flinched: false,
     protecting: false,
     fresh: true,
+    switchedInThisTurn: false,
     item: canonicalizeItem(slot.item) || cleanText(slot.item),
     itemConsumed: false,
     airBalloonPopped: false,
@@ -1561,8 +1632,17 @@ function buildCombatant(slot, rosterSlot) {
     disabledTurns: 0,
     perishCount: 0,
     chargedMoveBoost: false,
+    chargingMove: null,
     angerShellTriggered: false,
+    emergencyExitTriggered: false,
     slowStartTurns: cleanText(species.ability).toLowerCase().replace(/[^a-z0-9]+/g, "") === "slowstart" ? 5 : 0,
+    consumedItem: "",
+    cudChewItem: "",
+    cudChewTurns: 0,
+    battleBonded: false,
+    powerConstructed: false,
+    gulpMissileLoaded: false,
+    dancerMoveCopied: "",
     originalSpeciesId: species.id,
     originalShowdownName: species.showdownName,
     currentForm: species.form || "Base",
@@ -1571,21 +1651,22 @@ function buildCombatant(slot, rosterSlot) {
   };
 }
 
-function canSelectBattleMove(sideKey, moveIndex) {
+function canSelectBattleMove(sideKey, moveIndex, userIndex = getPrimaryActiveIndex(sideKey)) {
   if (!state.battle.started || state.battle.winner) return { ok: false, message: "The battle is not accepting actions." };
-  const mon = getActiveCombatant(sideKey);
+  const mon = getCombatantByIndex(sideKey, userIndex);
   if (!mon || mon.fainted) return { ok: false, message: "That side has no active battler." };
+  if (mon.chargingMove) return { ok: true, message: "" };
   const moveSlot = mon.moves[moveIndex];
   if (!moveSlot) return { ok: false, message: "That move slot is empty." };
   if (moveSlot.pp <= 0) return { ok: false, message: `${moveSlot.name} is out of PP.` };
-  if (isChoiceItem(mon.item) && mon.choiceLock && mon.choiceLock !== moveSlot.name) {
+  if (canUseHeldItem(mon) && isChoiceItem(mon.item) && mon.choiceLock && mon.choiceLock !== moveSlot.name) {
     return { ok: false, message: `${mon.displayName} is locked into ${mon.choiceLock}.` };
   }
   if (abilityId(mon) === "gorillatactics" && mon.choiceLock && mon.choiceLock !== moveSlot.name) {
     return { ok: false, message: `${mon.displayName} is locked into ${mon.choiceLock}.` };
   }
   const move = getBattleMove(moveSlot.name);
-  if (cleanText(mon.item) === "Assault Vest" && move?.damageClass === "status") {
+  if (canUseHeldItem(mon) && cleanText(mon.item) === "Assault Vest" && move?.damageClass === "status") {
     return { ok: false, message: "Assault Vest blocks status moves." };
   }
   if (move?.id === "fake-out" && !mon.fresh) {
@@ -1600,41 +1681,48 @@ function canSelectBattleMove(sideKey, moveIndex) {
   return { ok: true, message: "" };
 }
 
-function canSelectBattleSwitch(sideKey, toIndex) {
+function canSelectBattleSwitch(sideKey, toIndex, userIndex = getPrimaryActiveIndex(sideKey)) {
   if (!state.battle.started || state.battle.winner) return { ok: false, message: "The battle is not accepting switches." };
   const team = state.battle.teams[sideKey];
   const target = team?.combatants[toIndex];
+  const active = team?.combatants[userIndex];
+  const foe = getOpposingTarget(sideKey, userIndex);
   if (!team || !target) return { ok: false, message: "That switch target does not exist." };
-  if (team.active === toIndex) return { ok: false, message: "That battler is already active." };
+  if (getActiveIndexes(sideKey).includes(toIndex)) return { ok: false, message: "That battler is already active." };
   if (target.fainted) return { ok: false, message: "That battler has fainted." };
+  if (isTrappedByAbility(active, foe)) return { ok: false, message: `${active.displayName} cannot switch out.` };
   return { ok: true, message: "" };
 }
 
 function buildActionOrder() {
-  return ["alpha", "beta"].map((sideKey) => {
-    const action = state.battle.pendingActions[sideKey];
-    const user = getActiveCombatant(sideKey);
+  return ["alpha", "beta"].flatMap((sideKey) => getActiveIndexes(sideKey).map((activeIndex) => {
+    const action = state.battle.pendingActions[sideKey]?.[activeIndex];
+    const user = getCombatantByIndex(sideKey, activeIndex);
     if (!action || !user) return null;
     if (action.type === "switch") {
-      return { sideKey, type: "switch", toIndex: action.toIndex, actionRank: 2, priority: 6, speed: getModifiedBattleStat(user, "speed") };
+      return { sideKey, type: "switch", user, userIndex: activeIndex, toIndex: action.toIndex, actionRank: 2, priority: 6, speed: getModifiedBattleStat(user, "speed") };
     }
     const moveSlot = user.moves[action.moveIndex];
-    const baseMove = getBattleMove(moveSlot?.name);
+    const baseMove = getBattleMove(user.chargingMove?.name || moveSlot?.name);
     const move = baseMove ? { ...baseMove, originalType: baseMove.type, type: getMoveTypeForUse(user, baseMove) } : null;
-    applyCustomAbilityMoveUse(user, move, { opponent: getActiveCombatant(otherSideKey(sideKey)), move });
-    applyCustomAbilityPriorityTargeting(user, move, { opponent: getActiveCombatant(otherSideKey(sideKey)), move });
-    const quickClaw = cleanText(user.item) === "Quick Claw" && !user.itemConsumed && Math.random() < 0.2;
+    applyCustomAbilityMoveUse(user, move, { opponent: getOpposingTarget(sideKey, activeIndex), move });
+    applyCustomAbilityPriorityTargeting(user, move, { opponent: getOpposingTarget(sideKey, activeIndex), move });
+    const quickClaw = canUseHeldItem(user) && cleanText(user.item) === "Quick Claw" && Math.random() < 0.2;
+    const quickDraw = abilityId(user) === "quickdraw" && Math.random() < 0.3;
     if (quickClaw) appendBattleLog(user.displayName, "Quick Claw let it act first.");
+    if (quickDraw) appendBattleLog(user.displayName, "moved first with Quick Draw.");
     const priorityBonus = getAbilityPriorityBonus(user, move);
     return {
       sideKey,
       type: "move",
+      user,
+      userIndex: activeIndex,
       moveIndex: action.moveIndex,
       actionRank: 1,
-      priority: (move?.priority || 0) + priorityBonus + (quickClaw ? 0.5 : 0),
+      priority: (move?.priority || 0) + priorityBonus + (quickClaw || quickDraw ? 0.5 : 0),
       speed: getModifiedBattleStat(user, "speed"),
     };
-  }).filter(Boolean).sort((left, right) => {
+  })).filter(Boolean).sort((left, right) => {
     if (left.actionRank !== right.actionRank) return right.actionRank - left.actionRank;
     if (left.priority !== right.priority) return right.priority - left.priority;
     if (left.speed !== right.speed) return right.speed - left.speed;
@@ -1644,53 +1732,85 @@ function buildActionOrder() {
 
 function executeBattleAction(action) {
   if (action.type === "switch") {
-    performSwitch(action.sideKey, action.toIndex, "manual");
+    performSwitch(action.sideKey, action.toIndex, "manual", action.userIndex);
     return;
   }
-  performMove(action.sideKey, action.moveIndex);
+  if (action.user && getCombatantByIndex(action.sideKey, action.userIndex) !== action.user) return;
+  performMove(action.sideKey, action.moveIndex, action.userIndex);
 }
 
-function performSwitch(sideKey, toIndex, mode) {
+function performSwitch(sideKey, toIndex, mode, fromIndex = getPrimaryActiveIndex(sideKey)) {
   const team = state.battle.teams[sideKey];
-  const current = getActiveCombatant(sideKey);
+  const current = getCombatantByIndex(sideKey, fromIndex);
   const incoming = team?.combatants[toIndex];
-  if (!incoming || incoming.fainted || team.active === toIndex) return;
+  if (!incoming || incoming.fainted || getActiveIndexes(sideKey).includes(toIndex)) return;
   if (current) {
     applySwitchOutAbilities(current);
     restoreCombatantForm(current);
+    if (abilityId(current) === "zerotohero" && current.currentForm !== "Hero") {
+      current.currentForm = "Hero";
+      appendBattleLog(current.displayName, "prepared its Hero Form with Zero to Hero.");
+    }
     current.choiceLock = "";
+    current.chargingMove = null;
     current.disabledMove = "";
     current.disabledTurns = 0;
     current.protecting = false;
     current.flinched = false;
   }
-  team.active = toIndex;
+  setActiveIndex(sideKey, fromIndex, toIndex);
   incoming.protecting = false;
   incoming.flinched = false;
   incoming.fresh = true;
+  incoming.switchedInThisTurn = mode !== "lead";
   incoming.stolenItemThisTurn = false;
   refreshBattleFormState(incoming);
   appendBattleLog(team.label, mode === "manual" ? `switched to ${incoming.displayName}.` : `sent out ${incoming.displayName}.`);
-  applyEntryHazards(sideKey);
+  applyEntryHazards(sideKey, incoming);
   if (incoming.fainted) return;
-  applySwitchInAbilities(sideKey, mode);
+  applySwitchInAbilities(sideKey, mode, incoming);
 }
 
-function performMove(sideKey, moveIndex) {
-  const user = getActiveCombatant(sideKey);
-  const target = getActiveCombatant(otherSideKey(sideKey));
+function shouldChargeMove(user, move) {
+  if (!TWO_TURN_MOVE_IDS.has(move.id)) return false;
+  if (["solar-beam", "solar-blade"].includes(move.id) && getActiveWeather() === "sun") return false;
+  if (move.id === "electro-shot" && getActiveWeather() === "rain") return false;
+  if (canUseHeldItem(user) && cleanText(user.item) === "Power Herb") {
+    consumeItem(user);
+    appendBattleLog(user.displayName, "used Power Herb to skip the charge turn.");
+    return false;
+  }
+  return true;
+}
+
+function startChargingMove(user, move, moveName) {
+  user.chargingMove = { id: move.id, name: moveName };
+  const boosts = CHARGING_STAT_BOOSTS[move.id];
+  if (boosts?.length) {
+    const applied = applyBoostChanges(user, boosts);
+    if (applied.length) appendBattleLog(user.displayName, describeBoostChanges(applied));
+  }
+  appendBattleLog(user.displayName, TWO_TURN_MOVE_MESSAGES[move.id] || "began charging.");
+}
+
+function performMove(sideKey, moveIndex, userIndex = getPrimaryActiveIndex(sideKey)) {
+  const user = getCombatantByIndex(sideKey, userIndex);
+  const target = getOpposingTarget(sideKey, userIndex);
   if (!user || user.fainted) return;
-  const validation = canSelectBattleMove(sideKey, moveIndex);
+  const validation = canSelectBattleMove(sideKey, moveIndex, userIndex);
   if (!validation.ok) {
     appendBattleLog(user.displayName, validation.message || "could not use that move.");
     return;
   }
 
   const moveSlot = user.moves[moveIndex];
-  const baseMove = getBattleMove(moveSlot.name);
+  const chargingMove = user.chargingMove;
+  const moveName = chargingMove?.name || moveSlot.name;
+  const baseMove = getBattleMove(moveName);
   const move = baseMove ? { ...baseMove } : null;
   if (!move) {
-    appendBattleLog(user.displayName, `${moveSlot.name} has no battle data and fizzled out.`);
+    appendBattleLog(user.displayName, `${moveName} has no battle data and fizzled out.`);
+    user.chargingMove = null;
     return;
   }
   if (abilityId(user) === "truant" && user.truantLoafing) {
@@ -1702,9 +1822,9 @@ function performMove(sideKey, moveIndex) {
   user.fresh = false;
   user.protecting = false;
   user.stolenItemThisTurn = false;
-  moveSlot.pp = Math.max(0, moveSlot.pp - 1);
-  user.lastMoveUsed = moveSlot.name;
-  if ((isChoiceItem(user.item) || abilityId(user) === "gorillatactics") && !user.choiceLock) user.choiceLock = moveSlot.name;
+  if (!chargingMove) moveSlot.pp = Math.max(0, moveSlot.pp - 1);
+  user.lastMoveUsed = moveName;
+  if (!chargingMove && ((canUseHeldItem(user) && isChoiceItem(user.item)) || abilityId(user) === "gorillatactics") && !user.choiceLock) user.choiceLock = moveSlot.name;
   move.originalType = move.type;
   move.type = getMoveTypeForUse(user, move);
   applyCustomAbilityMoveUse(user, move, { opponent: target, move });
@@ -1714,12 +1834,21 @@ function performMove(sideKey, moveIndex) {
     user.types = [move.type];
     appendBattleLog(user.displayName, `changed type to ${move.type} with ${user.ability}.`);
   }
-  const moveLabel = getDisplayedMoveName(user, moveSlot, move);
-  appendBattleLog(user.displayName, `used ${moveLabel}.`);
+  const moveLabel = getDisplayedMoveName(user, { ...moveSlot, name: moveName }, move);
+  if (!chargingMove && shouldChargeMove(user, move)) {
+    startChargingMove(user, move, moveName);
+    if (abilityId(user) === "truant") user.truantLoafing = true;
+    return;
+  }
+  if (chargingMove) {
+    user.chargingMove = null;
+    appendBattleLog(user.displayName, `unleashed ${moveLabel}.`);
+  } else {
+    appendBattleLog(user.displayName, `used ${moveLabel}.`);
+  }
 
   if (CLEAR_ALL_BOOST_MOVES.has(move.id)) {
-    resetBoosts(getActiveCombatant("alpha"));
-    resetBoosts(getActiveCombatant("beta"));
+    ["alpha", "beta"].forEach((key) => getActiveCombatants(key).forEach(resetBoosts));
     appendBattleLog(moveSlot.name, "cleared all stat changes.");
     return;
   }
@@ -1756,6 +1885,11 @@ function performMove(sideKey, moveIndex) {
     appendBattleLog(moveSlot.name, "failed because there was no target.");
     return;
   }
+  if (SELF_DESTRUCT_MOVES.has(move.id) && ["alpha", "beta"].some((key) => getActiveCombatants(key).some((mon) => abilityId(mon) === "damp"))) {
+    appendBattleLog(moveLabel, "was prevented by Damp.");
+    if (abilityId(user) === "truant") user.truantLoafing = true;
+    return;
+  }
   if (targetIsOpponent && abilityId(recipient) === "pressure") {
     moveSlot.pp = Math.max(0, moveSlot.pp - 1);
   }
@@ -1772,7 +1906,7 @@ function performMove(sideKey, moveIndex) {
     appendBattleLog(moveSlot.name, "is not modeled in this local battle sandbox.");
     return;
   }
-  if (targetIsOpponent && recipient.protecting) {
+  if (targetIsOpponent && recipient.protecting && !(abilityId(user) === "unseenfist" && isContactMove(move))) {
     appendBattleLog(recipient.displayName, "blocked the attack with Protect.");
     return;
   }
@@ -1791,15 +1925,19 @@ function performMove(sideKey, moveIndex) {
     return;
   }
   if (targetIsOpponent && move.damageClass === "status" && abilityId(recipient) === "magicbounce") {
+    if (abilityId(user) === "myceliummight") {
+      appendBattleLog(user.displayName, "pushed through Magic Bounce with Mycelium Might.");
+    } else {
     appendBattleLog(recipient.displayName, "reflected the status move with Magic Bounce.");
     applyReflectedStatusMove(user, recipient, move);
     return;
+    }
   }
   if (targetIsOpponent && handleAbilityMoveImmunity(user, recipient, move)) {
     if (abilityId(user) === "truant") user.truantLoafing = true;
     return;
   }
-  if (targetIsOpponent && getTypeMultiplier(move.type, recipient.types, recipient) === 0) {
+  if (targetIsOpponent && getMoveTypeMultiplier(user, move, recipient) === 0) {
     appendBattleLog(recipient.displayName, `is unaffected by ${moveSlot.name}.`);
     if (abilityId(user) === "truant") user.truantLoafing = true;
     return;
@@ -1819,9 +1957,9 @@ function performMove(sideKey, moveIndex) {
   }
 
   let totalDamage = 0;
-  const typeMultiplier = targetIsOpponent ? getTypeMultiplier(move.type, recipient.types, recipient) : 1;
+  const typeMultiplier = targetIsOpponent ? getMoveTypeMultiplier(user, move, recipient) : 1;
   if (move.damageClass !== "status") {
-    const hits = getMoveHitCount(move);
+    const hits = getMoveHitCount(move, user);
     for (let hit = 0; hit < hits; hit += 1) {
       if (!recipient || recipient.fainted) break;
       const result = calculateMoveDamage(user, recipient, move, typeMultiplier);
@@ -1829,7 +1967,7 @@ function performMove(sideKey, moveIndex) {
         appendBattleLog(recipient.displayName, `is unaffected by ${moveSlot.name}.`);
         break;
       }
-      totalDamage += applyBattleDamage(recipient, result.damage, { attacker: user, move, moveName: moveSlot.name, typeMultiplier: result.typeMultiplier });
+      totalDamage += applyBattleDamage(recipient, result.damage, { attacker: user, move, moveName: moveSlot.name, typeMultiplier: result.typeMultiplier, crit: result.crit });
       if (result.crit) appendBattleLog(moveSlot.name, "landed a critical hit.");
       if (result.typeMultiplier > 1) appendBattleLog(moveSlot.name, "was super effective.");
       else if (result.typeMultiplier > 0 && result.typeMultiplier < 1) appendBattleLog(moveSlot.name, "was not very effective.");
@@ -1839,8 +1977,13 @@ function performMove(sideKey, moveIndex) {
   }
 
   if (targetIsOpponent && totalDamage > 0 && !recipient.fainted) {
+    if (abilityId(user) === "gulpmissile" && ["surf", "dive"].includes(move.id)) {
+      user.gulpMissileLoaded = true;
+      appendBattleLog(user.displayName, "readied Gulp Missile.");
+    }
     runCustomAbilityContactOnHit(recipient, user, move, totalDamage);
     applyDamageTakenAbilityEffects(user, recipient, move, totalDamage);
+    applyAttackerAfterHitAbilities(user, recipient, move, totalDamage);
     applyItemTheftAbilities(user, recipient, move, totalDamage);
   }
 
@@ -1854,27 +1997,34 @@ function performMove(sideKey, moveIndex) {
     if (healed > 0) appendBattleLog(user.displayName, `restored ${healed} HP.`);
   }
   if (move.drain > 0 && totalDamage > 0) {
-    const healed = healCombatant(user, Math.max(1, Math.floor((totalDamage * move.drain) / 100)));
-    if (healed > 0) appendBattleLog(user.displayName, `drained ${healed} HP.`);
+    if (abilityId(recipient) === "liquidooze") {
+      applyDirectDamage(user, Math.max(1, Math.floor((totalDamage * move.drain) / 100)), "Liquid Ooze");
+    } else {
+      const healed = healCombatant(user, Math.max(1, Math.floor((totalDamage * move.drain) / 100)));
+      if (healed > 0) appendBattleLog(user.displayName, `drained ${healed} HP.`);
+    }
   }
   if (move.drain < 0 && totalDamage > 0) {
     const recoil = Math.max(1, Math.floor((totalDamage * Math.abs(move.drain)) / 100));
-    applyDirectDamage(user, recoil, `${moveSlot.name} recoil`);
+    if (abilityId(user) !== "rockhead") applyDirectDamage(user, recoil, `${moveLabel} recoil`);
   }
   const flinchChance = abilityId(user) === "serenegrace" ? move.flinchChance * 2 : move.flinchChance;
-  if (targetIsOpponent && totalDamage > 0 && move.flinchChance > 0 && abilityId(user) !== "sheerforce" && !recipient.fainted && Math.random() * 100 < flinchChance) {
+  const stenchChance = abilityId(user) === "stench" && move.damageClass !== "status" && !move.flinchChance ? 10 : 0;
+  const effectiveFlinchChance = Math.max(flinchChance, stenchChance);
+  if (targetIsOpponent && totalDamage > 0 && effectiveFlinchChance > 0 && abilityId(user) !== "sheerforce" && abilityId(recipient) !== "shielddust" && !recipient.fainted && abilityId(recipient) !== "innerfocus" && Math.random() * 100 < effectiveFlinchChance) {
     recipient.flinched = true;
     appendBattleLog(recipient.displayName, "flinched.");
   }
-  if (totalDamage > 0 && cleanText(user.item) === "Shell Bell" && !user.itemConsumed) {
+  if (totalDamage > 0 && canUseHeldItem(user) && cleanText(user.item) === "Shell Bell") {
     const healed = healCombatant(user, Math.max(1, Math.floor(totalDamage / 8)));
     if (healed > 0) appendBattleLog(user.displayName, "restored HP with Shell Bell.");
   }
-  if (totalDamage > 0 && cleanText(user.item) === "Life Orb" && !user.itemConsumed) {
+  if (totalDamage > 0 && canUseHeldItem(user) && cleanText(user.item) === "Life Orb" && abilityId(user) !== "magicguard") {
     applyDirectDamage(user, Math.max(1, Math.floor(user.maxHp / 10)), "Life Orb recoil");
   }
   if ((FORCE_SWITCH_MOVES.has(move.id) || move.category === "force-switch") && targetIsOpponent && !recipient.fainted) {
-    forceSwitch(otherSideKey(sideKey));
+    if (blocksForcedSwitch(recipient)) return;
+    forceSwitch(otherSideKey(sideKey), getActiveIndexes(otherSideKey(sideKey)).find((index) => getCombatantByIndex(otherSideKey(sideKey), index) === recipient));
   }
   if (SELF_DESTRUCT_MOVES.has(move.id) && !user.fainted) {
     applyDirectDamage(user, user.hp, moveSlot.name);
@@ -1882,29 +2032,33 @@ function performMove(sideKey, moveIndex) {
   applyCustomMoveModifiers(user, recipient, move, totalDamage, targetIsOpponent);
   applyMoveBoostEffects(user, recipient, move);
   applyMoveAilmentEffects(user, recipient, move);
+  triggerDancerCopies(user, move);
   if (abilityId(user) === "truant") user.truantLoafing = true;
 }
 
 function applyMoveBoostEffects(user, recipient, move) {
   if (!move.boosts?.length) return;
-  if (abilityId(user) === "sheerforce") return;
+  if (abilityId(user) === "sheerforce" && move.damageClass !== "status") return;
+  if (CHARGING_STAT_BOOSTS[move.id]) return;
   const chance = getBoostEffectChance(move, user);
   if (chance <= 0 || Math.random() * 100 >= chance) return;
   const appliesToSelf = move.damageClass === "status" ? SELF_TARGETS.has(move.target) : move.category === "damage-raise";
   const target = appliesToSelf ? user : recipient;
   if (!target) return;
+  if (target !== user && move.damageClass !== "status" && abilityId(target) === "shielddust") return;
   const applied = applyBoostChanges(target, move.boosts, target === user ? null : user);
   if (applied.length) appendBattleLog(target.displayName, describeBoostChanges(applied));
 }
 
 function applyMoveAilmentEffects(user, recipient, move) {
   if (!move.ailment || move.ailment === "none" || move.ailment === "unknown") return;
-  if (abilityId(user) === "sheerforce") return;
+  if (abilityId(user) === "sheerforce" && move.damageClass !== "status") return;
   const chance = getAilmentEffectChance(move, user);
   if (chance <= 0 || Math.random() * 100 >= chance) return;
   const appliesToSelf = move.damageClass === "status" && SELF_TARGETS.has(move.target);
   const target = appliesToSelf ? user : recipient;
   if (!target) return;
+  if (target !== user && move.damageClass !== "status" && abilityId(target) === "shielddust") return;
 
   if (move.id === "toxic") {
     if (inflictMajorStatus(target, "tox", { source: user })) appendBattleLog(target.displayName, "was badly poisoned.");
@@ -1927,7 +2081,7 @@ function resolveMoveEffectTarget(user, recipient, targetMode) {
 
 function applyCustomMoveModifiers(user, recipient, move, totalDamage, targetIsOpponent) {
   if (!Array.isArray(move.modifiers) || !move.modifiers.length) return;
-  if (abilityId(user) === "sheerforce") return;
+  if (abilityId(user) === "sheerforce" && move.damageClass !== "status") return;
   move.modifiers.forEach((modifier) => {
     const chance = clamp(safeNumber(modifier.chance) || 100, 1, 100);
     if (Math.random() * 100 >= chance) return;
@@ -1987,7 +2141,7 @@ function applyCustomMoveModifiers(user, recipient, move, totalDamage, targetIsOp
 
 function calculateMoveDamage(user, target, move, precomputedMultiplier) {
   const fixedDamage = FIXED_DAMAGE_MOVES[move.id];
-  const typeMultiplier = precomputedMultiplier ?? getTypeMultiplier(move.type, target.types, target);
+  const typeMultiplier = precomputedMultiplier ?? getMoveTypeMultiplier(user, move, target);
   if (fixedDamage) {
     const damage = Math.max(0, Math.min(target.hp, fixedDamage(user, target)));
     return { damage, crit: false, typeMultiplier, noEffect: damage <= 0 };
@@ -2008,11 +2162,13 @@ function calculateMoveDamage(user, target, move, precomputedMultiplier) {
   const levelFactor = Math.floor((2 * user.level) / 5) + 2;
   const adjustedPower = Math.floor(getModifiedMovePower(user, target, move) * getMovePowerAbilityModifier(user, move));
   const baseDamage = Math.floor(Math.floor((levelFactor * adjustedPower * attack) / defense) / 50) + 2;
-  const crit = (abilityId(user) === "merciless" && ["poison", "tox"].includes(target.status)) || Math.random() < getCritChance(move, user);
+  const critBlocked = ["battlearmor", "shellarmor"].includes(abilityId(target)) && !isAbilitySuppressed(user, target);
+  const crit = !critBlocked && ((abilityId(user) === "merciless" && ["poison", "tox"].includes(target.status)) || Math.random() < getCritChance(move, user));
   const stab = user.types.includes(move.type) ? getStabModifier(user) : 1;
   const randomFactor = 0.85 + Math.random() * 0.15;
   let modifier = randomFactor * stab * typeMultiplier * getDamageItemModifier(user, move, typeMultiplier);
   modifier *= getWeatherPowerModifier(move);
+  modifier *= getAuraDamageModifier(move);
   modifier *= getCustomAbilityDamageModifier(user, move, "immunity-damage", typeMultiplier, "attacker");
   modifier *= getCustomAbilityDamageModifier(target, move, "immunity-damage", typeMultiplier, "defender");
   modifier *= getOffensiveAbilityModifier(user, target, move, typeMultiplier);
@@ -2033,6 +2189,7 @@ function calculateMoveDamage(user, target, move, precomputedMultiplier) {
 
 function applyBattleDamage(target, damage, context) {
   let actual = Math.max(0, Math.floor(damage));
+  const hpBeforeDamage = target.hp;
   if (actual <= 0) return 0;
   if (!target.disguiseBroken && abilityId(target) === "disguise" && context.move.damageClass !== "status") {
     target.disguiseBroken = true;
@@ -2048,23 +2205,35 @@ function applyBattleDamage(target, damage, context) {
     actual = Math.max(0, target.hp - 1);
     appendBattleLog(target.displayName, "held on with Sturdy.");
   }
-  if (target.hp === target.maxHp && cleanText(target.item) === "Focus Sash" && !target.itemConsumed && actual >= target.hp) {
+  if (target.hp === target.maxHp && canUseHeldItem(target) && cleanText(target.item) === "Focus Sash" && actual >= target.hp) {
     target.itemConsumed = true;
     actual = Math.max(0, target.hp - 1);
     appendBattleLog(target.displayName, "hung on with Focus Sash.");
   }
   target.hp = Math.max(0, target.hp - actual);
-  if (cleanText(target.item) === "Air Balloon" && !target.airBalloonPopped && actual > 0) {
+  if (context.crit && !target.fainted && target.hp > 0 && abilityId(target) === "angerpoint") {
+    const applied = applyBoostChanges(target, [{ stat: "attack", change: 12 }]);
+    if (applied.length) appendBattleLog(target.displayName, "maxed its Attack with Anger Point.");
+  }
+  if (!target.fainted && target.hp > 0 && target.hp <= Math.floor(target.maxHp / 2) && ["emergencyexit", "wimpout"].includes(abilityId(target)) && !target.emergencyExitTriggered) {
+    target.emergencyExitTriggered = true;
+    const sideKey = getBattleSideForMon(target);
+    if (sideKey) {
+      appendBattleLog(target.displayName, `activated ${target.ability}.`);
+      forceSwitch(sideKey);
+    }
+  }
+  if (canUseHeldItem(target) && cleanText(target.item) === "Air Balloon" && !target.airBalloonPopped && actual > 0) {
     target.airBalloonPopped = true;
     appendBattleLog(target.displayName, "popped its Air Balloon.");
   }
   applyThresholdItem(target);
-  if (context.typeMultiplier > 1 && cleanText(target.item) === "Weakness Policy" && !target.itemConsumed && !target.fainted) {
+  if (context.typeMultiplier > 1 && canUseHeldItem(target) && cleanText(target.item) === "Weakness Policy" && !target.fainted) {
     target.itemConsumed = true;
     applyBoostChanges(target, [{ stat: "attack", change: 2 }, { stat: "spattack", change: 2 }], null);
     appendBattleLog(target.displayName, "activated Weakness Policy.");
   }
-  if (cleanText(target.item) === "Rocky Helmet" && !target.itemConsumed && context.move.damageClass === "physical" && !context.attacker.fainted) {
+  if (canUseHeldItem(target) && cleanText(target.item) === "Rocky Helmet" && context.move.damageClass === "physical" && !context.attacker.fainted) {
     applyDirectDamage(context.attacker, Math.max(1, Math.floor(context.attacker.maxHp / 6)), "Rocky Helmet");
   }
   applyContactAbilityEffects(context.attacker, target, context.move);
@@ -2077,7 +2246,10 @@ function applyBattleDamage(target, damage, context) {
     appendBattleLog(target.displayName, "fainted.");
     applyAftermathAbility(context.attacker, target, context.move);
     runCustomAbilityFaintReplacement(target, context);
-    triggerFaintAbilities(target, context);
+    triggerFaintAbilities(target, { ...context, damageTaken: Math.min(actual, hpBeforeDamage) });
+  } else {
+    activatePowerConstruct(target);
+    refreshBattleFormState(target);
   }
   return actual;
 }
@@ -2097,6 +2269,9 @@ function applyDirectDamage(mon, amount, sourceLabel) {
     appendBattleLog(mon.displayName, "fainted.");
     runCustomAbilityFaintReplacement(mon, { sourceLabel });
     triggerFaintAbilities(mon, { sourceLabel });
+  } else {
+    activatePowerConstruct(mon);
+    refreshBattleFormState(mon);
   }
   return actual;
 }
@@ -2108,14 +2283,74 @@ function healCombatant(mon, amount) {
   return healed;
 }
 
+function consumeItem(mon) {
+  if (!mon?.item) return "";
+  const item = mon.item;
+  mon.consumedItem = item;
+  if (/Berry/i.test(item) && abilityId(mon) === "cudchew") {
+    mon.cudChewItem = item;
+    mon.cudChewTurns = 2;
+  }
+  mon.item = "";
+  mon.itemConsumed = true;
+  return item;
+}
+
+function restoreConsumedItem(mon, sourceLabel) {
+  if (!mon?.consumedItem) return false;
+  mon.item = mon.consumedItem;
+  mon.consumedItem = "";
+  mon.itemConsumed = false;
+  appendBattleLog(mon.displayName, `restored its item with ${sourceLabel}.`);
+  return true;
+}
+
+function getBerryHealAmount(mon, item) {
+  if (item === "Sitrus Berry") return Math.max(1, Math.floor(mon.maxHp / (abilityId(mon) === "ripen" ? 2 : 4)));
+  if (item === "Oran Berry") return abilityId(mon) === "ripen" ? 20 : 10;
+  if (["Figy Berry", "Wiki Berry", "Mago Berry", "Aguav Berry", "Iapapa Berry"].includes(item)) return Math.max(1, Math.floor(mon.maxHp / (abilityId(mon) === "ripen" ? 2 : 4)));
+  return 0;
+}
+
+function useBerryItem(mon, item, sourceLabel = item) {
+  const healAmount = getBerryHealAmount(mon, item);
+  if (healAmount > 0) {
+    consumeItem(mon);
+    healCombatant(mon, healAmount);
+    appendBattleLog(mon.displayName, `restored HP with ${sourceLabel}.`);
+    if (abilityId(mon) === "cheekpouch") {
+      const healed = healCombatant(mon, Math.max(1, Math.floor(mon.maxHp / 3)));
+      if (healed > 0) appendBattleLog(mon.displayName, "restored extra HP with Cheek Pouch.");
+    }
+    return true;
+  }
+  return false;
+}
+
+function reuseCudChewBerry(mon) {
+  const item = mon.cudChewItem;
+  mon.cudChewItem = "";
+  if (!item) return false;
+  const healAmount = getBerryHealAmount(mon, item);
+  if (healAmount > 0) {
+    healCombatant(mon, healAmount);
+    appendBattleLog(mon.displayName, `reused ${item} with Cud Chew.`);
+    return true;
+  }
+  return false;
+}
+
 function resolveBeforeMoveStatus(mon, move) {
   if (mon.flinched) {
     mon.flinched = false;
+    if (abilityId(mon) === "steadfast") {
+      triggerBoostAbility(mon, [{ stat: "speed", change: 1 }], "raised its Speed with Steadfast.");
+    }
     appendBattleLog(mon.displayName, "flinched and could not move.");
     return { blocked: true };
   }
   if (mon.status === "sleep") {
-    mon.statusTurns -= 1;
+    mon.statusTurns -= abilityId(mon) === "earlybird" ? 2 : 1;
     if (mon.statusTurns > 0) {
       appendBattleLog(mon.displayName, "is asleep.");
       return { blocked: true };
@@ -2151,9 +2386,11 @@ function resolveBeforeMoveStatus(mon, move) {
 
 function applyEndOfTurnEffects() {
   ["alpha", "beta"].forEach((sideKey) => {
-    const mon = getActiveCombatant(sideKey);
-    const opponent = getActiveCombatant(otherSideKey(sideKey));
+    getActiveIndexes(sideKey).forEach((activeIndex) => {
+      const mon = getCombatantByIndex(sideKey, activeIndex);
+      const opponent = getOpposingTarget(sideKey, activeIndex);
     if (!mon || mon.fainted) return;
+    mon.switchedInThisTurn = false;
     mon.protecting = false;
     mon.flinched = false;
     if (mon.perishCount > 0) {
@@ -2190,7 +2427,8 @@ function applyEndOfTurnEffects() {
       const healed = healCombatant(mon, Math.max(1, Math.floor(mon.maxHp / 8)));
       if (healed > 0) appendBattleLog(mon.displayName, "restored HP with Poison Heal.");
     } else if (mon.status === "burn" && abilityId(mon) !== "magicguard") {
-      applyDirectDamage(mon, Math.max(1, Math.floor(mon.maxHp / 16)), "Burn");
+      const divisor = abilityId(mon) === "heatproof" ? 32 : 16;
+      applyDirectDamage(mon, Math.max(1, Math.floor(mon.maxHp / divisor)), "Burn");
     } else if (mon.status === "poison" && abilityId(mon) !== "magicguard") {
       applyDirectDamage(mon, Math.max(1, Math.floor(mon.maxHp / 8)), "Poison");
     } else if (mon.status === "tox" && abilityId(mon) !== "magicguard") {
@@ -2232,43 +2470,98 @@ function applyEndOfTurnEffects() {
     if (abilityId(mon) === "speedboost") {
       triggerBoostAbility(mon, [{ stat: "speed", change: 1 }], "raised its Speed with Speed Boost.");
     }
+    if (abilityId(mon) === "moody") {
+      applyMoody(mon);
+    }
+    if (abilityId(mon) === "baddreams" && opponent?.status === "sleep") {
+      applyDirectDamage(opponent, Math.max(1, Math.floor(opponent.maxHp / 8)), "Bad Dreams");
+    }
     if (mon.fainted) return;
-    if (cleanText(mon.item) === "Leftovers" && !mon.itemConsumed) {
+    if (canUseHeldItem(mon) && cleanText(mon.item) === "Leftovers") {
       if (healCombatant(mon, Math.max(1, Math.floor(mon.maxHp / 16))) > 0) appendBattleLog(mon.displayName, "restored HP with Leftovers.");
     }
-    if (cleanText(mon.item) === "Black Sludge" && !mon.itemConsumed) {
+    if (canUseHeldItem(mon) && cleanText(mon.item) === "Black Sludge") {
       if (mon.types.includes("Poison")) {
         if (healCombatant(mon, Math.max(1, Math.floor(mon.maxHp / 16))) > 0) appendBattleLog(mon.displayName, "restored HP with Black Sludge.");
       } else if (abilityId(mon) !== "magicguard") {
         applyDirectDamage(mon, Math.max(1, Math.floor(mon.maxHp / 8)), "Black Sludge");
       }
     }
-    if (cleanText(mon.item) === "Flame Orb" && !mon.itemConsumed && !mon.status) {
+    if (canUseHeldItem(mon) && cleanText(mon.item) === "Flame Orb" && !mon.status) {
       if (inflictMajorStatus(mon, "burn")) appendBattleLog(mon.displayName, "was burned by Flame Orb.");
     }
-    if (cleanText(mon.item) === "Toxic Orb" && !mon.itemConsumed && !mon.status) {
+    if (canUseHeldItem(mon) && cleanText(mon.item) === "Toxic Orb" && !mon.status) {
       if (inflictMajorStatus(mon, "tox")) appendBattleLog(mon.displayName, "was badly poisoned by Toxic Orb.");
+    }
+    if (abilityId(mon) === "harvest" && !mon.item && mon.consumedItem && /Berry/i.test(mon.consumedItem) && getActiveWeather() === "sun") {
+      restoreConsumedItem(mon, "Harvest");
+    } else if (abilityId(mon) === "harvest" && !mon.item && mon.consumedItem && /Berry/i.test(mon.consumedItem) && Math.random() < 0.5) {
+      restoreConsumedItem(mon, "Harvest");
+    }
+    if (abilityId(mon) === "cudchew" && mon.cudChewItem && mon.cudChewTurns > 0) {
+      mon.cudChewTurns -= 1;
+      if (mon.cudChewTurns === 0) reuseCudChewBerry(mon);
+    }
+    if (abilityId(mon) === "healer" && mon.status && Math.random() < 0.3) {
+      mon.status = "";
+      mon.statusTurns = 0;
+      mon.toxicCounter = 0;
+      appendBattleLog(mon.displayName, "was cured by Healer.");
+    }
+    if (abilityId(mon) === "pickup" && !mon.item && mon.consumedItem && Math.random() < 0.1) {
+      restoreConsumedItem(mon, "Pickup");
     }
     runCustomAbilityEvent(mon, "end-of-turn", { opponent });
     runCustomAbilityEvent(mon, "weather-terrain", { opponent });
-    refreshBattleFormState(mon);
+      refreshBattleFormState(mon);
+    });
   });
   tickFieldDurations();
 }
 
-function autoReplaceFainted(sideKey) {
-  const team = state.battle.teams[sideKey];
-  const active = team?.combatants?.[team.active];
-  if (!team || (active && !active.fainted)) return;
-  const replacementIndex = team.combatants.findIndex((mon) => !mon.fainted);
-  if (replacementIndex >= 0) performSwitch(sideKey, replacementIndex, "replacement");
+function applyMoody(mon) {
+  const raiseCandidates = BATTLE_STAGE_KEYS.filter((stat) => mon.boosts[stat] < 6);
+  if (!raiseCandidates.length) return;
+  const raisedStat = raiseCandidates[Math.floor(Math.random() * raiseCandidates.length)];
+  const loweredCandidates = BATTLE_STAGE_KEYS.filter((stat) => stat !== raisedStat && mon.boosts[stat] > -6);
+  const applied = applyBoostChanges(mon, [{ stat: raisedStat, change: 2 }]);
+  if (loweredCandidates.length) {
+    const loweredStat = loweredCandidates[Math.floor(Math.random() * loweredCandidates.length)];
+    applied.push(...applyBoostChanges(mon, [{ stat: loweredStat, change: -1 }]));
+  }
+  if (applied.length) appendBattleLog(mon.displayName, "shifted its stats with Moody.");
 }
 
-function forceSwitch(sideKey) {
+function autoReplaceFainted(sideKey) {
   const team = state.battle.teams[sideKey];
   if (!team) return;
-  const replacementIndex = team.combatants.findIndex((mon, index) => index !== team.active && !mon.fainted);
-  if (replacementIndex >= 0) performSwitch(sideKey, replacementIndex, "replacement");
+  getActiveIndexes(sideKey).forEach((activeIndex) => {
+    const active = team.combatants[activeIndex];
+    if (active && !active.fainted) return;
+    const replacementIndex = team.combatants.findIndex((mon, index) => !mon.fainted && !getActiveIndexes(sideKey).includes(index));
+    if (replacementIndex >= 0) performSwitch(sideKey, replacementIndex, "replacement", activeIndex);
+  });
+}
+
+function forceSwitch(sideKey, fromIndex = getPrimaryActiveIndex(sideKey)) {
+  const team = state.battle.teams[sideKey];
+  if (!team) return;
+  const replacementIndex = team.combatants.findIndex((mon, index) => !getActiveIndexes(sideKey).includes(index) && !mon.fainted);
+  if (replacementIndex >= 0) performSwitch(sideKey, replacementIndex, "replacement", fromIndex);
+}
+
+function blocksForcedSwitch(mon) {
+  const id = abilityId(mon);
+  if (id === "suctioncups") {
+    appendBattleLog(mon.displayName, "anchored itself with Suction Cups.");
+    return true;
+  }
+  if (id === "guarddog") {
+    triggerBoostAbility(mon, [{ stat: "attack", change: 1 }], "raised its Attack with Guard Dog.");
+    appendBattleLog(mon.displayName, "refused to be forced out with Guard Dog.");
+    return true;
+  }
+  return false;
 }
 
 function tickFieldDurations() {
@@ -2278,7 +2571,7 @@ function tickFieldDurations() {
       appendBattleLog("Weather", `${normalizeWeatherLabel(state.battle.weather)} faded.`);
       state.battle.weather = "";
       state.battle.weatherTurns = 0;
-      ["alpha", "beta"].forEach((sideKey) => refreshBattleFormState(getActiveCombatant(sideKey)));
+      ["alpha", "beta"].forEach((sideKey) => getActiveCombatants(sideKey).forEach(refreshBattleFormState));
     }
   }
   if (state.battle.terrain && state.battle.terrainTurns > 0) {
@@ -2287,7 +2580,7 @@ function tickFieldDurations() {
       appendBattleLog("Terrain", `${normalizeTerrainLabel(state.battle.terrain)} disappeared.`);
       state.battle.terrain = "";
       state.battle.terrainTurns = 0;
-      ["alpha", "beta"].forEach((sideKey) => refreshBattleFormState(getActiveCombatant(sideKey)));
+      ["alpha", "beta"].forEach((sideKey) => getActiveCombatants(sideKey).forEach(refreshBattleFormState));
     }
   }
 }
@@ -2354,7 +2647,7 @@ function describePendingAction(sideKey, action) {
   const team = state.battle.started ? state.battle.teams[sideKey] : null;
   if (!team) return "No action queued.";
   if (action.type === "switch") return `Switch to ${team.combatants[action.toIndex]?.displayName || "reserve"}`;
-  return `Use ${team.combatants[team.active]?.moves[action.moveIndex]?.name || "move"}`;
+  return `Use ${team.combatants[action.userIndex]?.moves[action.moveIndex]?.name || "move"}`;
 }
 
 function buildSpeciesOptions(selectedId) {
@@ -2571,7 +2864,7 @@ function createEmptyBattleState() {
       beta: { spikes: 0, toxicSpikes: 0, stealthRock: false, stickyWeb: false },
     },
     teams: {},
-    pendingActions: { alpha: null, beta: null },
+    pendingActions: { alpha: {}, beta: {} },
     log: [],
   };
 }
@@ -2607,7 +2900,21 @@ function getModifiedBattleStatWithStage(mon, statKey, stage, move) {
   if (statKey === "attack" && ["hugepower", "purepower"].includes(abilityId(mon))) value *= 2;
   if (statKey === "attack" && abilityId(mon) === "gorillatactics") value *= 1.5;
   if (statKey === "attack" && abilityId(mon) === "slowstart" && mon.slowStartTurns > 0) value *= 0.5;
+  if (statKey === "attack" && abilityId(mon) === "orichalcumpulse" && getActiveWeather() === "sun") value *= 4 / 3;
+  if (statKey === "attack" && abilityId(mon) === "flowergift" && getActiveWeather() === "sun") value *= 1.5;
+  if (statKey === "attack" && opposingActiveHasAbility(mon, "tablets of ruin")) value *= 0.75;
+  if (statKey === "attack" && abilityId(mon) === "zerotohero" && mon.currentForm === "Hero") value *= 1.25;
+  if (statKey === "defense" && opposingActiveHasAbility(mon, "sword of ruin")) value *= 0.75;
+  if (statKey === "defense" && abilityId(mon) === "powerconstruct" && mon.currentForm === "Complete") value *= 1.1;
+  if (statKey === "defense" && abilityId(mon) === "grassypelt" && getActiveTerrain() === "grassy") value *= 1.5;
+  if (statKey === "spattack" && abilityId(mon) === "hadronengine" && getActiveTerrain() === "electric") value *= 4 / 3;
+  if (statKey === "spattack" && opposingActiveHasAbility(mon, "vessel of ruin")) value *= 0.75;
+  if (statKey === "spattack" && abilityId(mon) === "zerotohero" && mon.currentForm === "Hero") value *= 1.25;
+  if (statKey === "spdefense" && opposingActiveHasAbility(mon, "beads of ruin")) value *= 0.75;
+  if (statKey === "spdefense" && abilityId(mon) === "powerconstruct" && mon.currentForm === "Complete") value *= 1.1;
+  if (statKey === "spdefense" && abilityId(mon) === "flowergift" && getActiveWeather() === "sun") value *= 1.5;
   if (statKey === "speed" && abilityId(mon) === "slowstart" && mon.slowStartTurns > 0) value *= 0.5;
+  if (statKey === "speed" && abilityId(mon) === "zerotohero" && mon.currentForm === "Hero") value *= 1.25;
   if (statKey === "speed" && getActiveWeather() === "rain" && abilityId(mon) === "swiftswim") value *= 2;
   if (statKey === "speed" && getActiveWeather() === "sun" && abilityId(mon) === "chlorophyll") value *= 2;
   if (statKey === "speed" && getActiveWeather() === "sand" && abilityId(mon) === "sandrush") value *= 2;
@@ -2616,11 +2923,13 @@ function getModifiedBattleStatWithStage(mon, statKey, stage, move) {
   if (statKey === "speed" && mon.status === "paralysis" && abilityId(mon) !== "quickfeet") value *= 0.5;
   if (statKey === "speed" && mon.itemConsumed && abilityId(mon) === "unburden") value *= 2;
   if (statKey === "speed" && abilityId(mon) === "quickfeet" && mon.status) value *= 1.5;
-  if (statKey === "speed" && cleanText(mon.item) === "Choice Scarf" && !mon.itemConsumed) value *= 1.5;
-  if (statKey === "attack" && cleanText(mon.item) === "Choice Band" && !mon.itemConsumed) value *= 1.5;
-  if (statKey === "spattack" && cleanText(mon.item) === "Choice Specs" && !mon.itemConsumed) value *= 1.5;
-  if (statKey === "spdefense" && cleanText(mon.item) === "Assault Vest" && !mon.itemConsumed) value *= 1.5;
-  if (cleanText(mon.item) === "Air Balloon" && move?.type === "Ground" && !mon.airBalloonPopped) return value;
+  if (statKey === "speed" && canUseHeldItem(mon) && cleanText(mon.item) === "Choice Scarf") value *= 1.5;
+  if (statKey === "attack" && canUseHeldItem(mon) && cleanText(mon.item) === "Choice Band") value *= 1.5;
+  if (statKey === "spattack" && canUseHeldItem(mon) && cleanText(mon.item) === "Choice Specs") value *= 1.5;
+  if (statKey === "spdefense" && canUseHeldItem(mon) && cleanText(mon.item) === "Assault Vest") value *= 1.5;
+  if (isProtosynthesisActive(mon) && getHighestStatKey(mon) === statKey) value *= statKey === "speed" ? 1.5 : 1.3;
+  if (isQuarkDriveActive(mon) && getHighestStatKey(mon) === statKey) value *= statKey === "speed" ? 1.5 : 1.3;
+  if (canUseHeldItem(mon) && cleanText(mon.item) === "Air Balloon" && move?.type === "Ground" && !mon.airBalloonPopped) return value;
   return value;
 }
 
@@ -2633,24 +2942,42 @@ function getAccuracyStageMultiplier(stage) {
 }
 
 function getTypeMultiplier(moveType, targetTypes, target) {
-  if (cleanText(target.item) === "Air Balloon" && moveType === "Ground" && !target.airBalloonPopped) return 0;
+  if (canUseHeldItem(target) && cleanText(target.item) === "Air Balloon" && moveType === "Ground" && !target.airBalloonPopped) return 0;
   return (targetTypes || []).reduce((multiplier, type) => multiplier * (typeof typeChart[moveType]?.[type] === "number" ? typeChart[moveType][type] : 1), 1);
+}
+
+function getMoveTypeMultiplier(user, move, target) {
+  let multiplier = getTypeMultiplier(move.type, target.types, target);
+  if (multiplier === 0 && ["scrappy", "mindseye"].includes(abilityId(user)) && target.types.includes("Ghost") && ["Normal", "Fighting"].includes(move.type)) {
+    multiplier = target.types.reduce((total, type) => {
+      if (type === "Ghost") return total;
+      return total * (typeof typeChart[move.type]?.[type] === "number" ? typeChart[move.type][type] : 1);
+    }, 1);
+  }
+  return multiplier;
 }
 
 function moveHitsTarget(user, target, move, targetIsOpponent) {
   if (!targetIsOpponent || move.accuracy === null || move.accuracy === 0) return true;
+  if (abilityId(user) === "noguard" || abilityId(target) === "noguard") return true;
   const userAccuracy = getModifiedBattleStat(user, "accuracy");
-  const targetEvasion = getModifiedBattleStat(target, "evasion");
-  const itemModifier = cleanText(user.item) === "Wide Lens" ? 1.1 : 1;
-  const targetModifier = cleanText(target.item) === "Bright Powder" ? 0.9 : 1;
-  const abilityModifier = abilityId(user) === "hustle" && move.damageClass === "physical" ? 0.8 : 1;
-  const chance = move.accuracy * userAccuracy / Math.max(0.1, targetEvasion) * itemModifier * targetModifier * abilityModifier;
+  const targetEvasion = ["keeneye", "mindseye", "illuminate"].includes(abilityId(user)) ? 1 : getModifiedBattleStat(target, "evasion");
+  const itemModifier = canUseHeldItem(user) && cleanText(user.item) === "Wide Lens" ? 1.1 : 1;
+  let targetModifier = canUseHeldItem(target) && cleanText(target.item) === "Bright Powder" ? 0.9 : 1;
+  if (abilityId(target) === "sandveil" && getActiveWeather() === "sand") targetModifier *= 0.8;
+  if (abilityId(target) === "snowcloak" && getActiveWeather() === "snow") targetModifier *= 0.8;
+  if (abilityId(target) === "tangledfeet" && target.confusionTurns > 0) targetModifier *= 0.5;
+  let abilityModifier = abilityId(user) === "hustle" && move.damageClass === "physical" ? 0.8 : 1;
+  if (abilityId(user) === "compoundeyes") abilityModifier *= 1.3;
+  if (abilityId(user) === "victorystar") abilityModifier *= 1.1;
+  let chance = move.accuracy * userAccuracy / Math.max(0.1, targetEvasion) * itemModifier * targetModifier * abilityModifier;
+  if (move.damageClass === "status" && abilityId(target) === "wonderskin") chance = Math.min(chance, 50);
   return Math.random() * 100 < chance;
 }
 
 function getDamageItemModifier(user, move, typeMultiplier) {
   const item = cleanText(user.item);
-  if (!item || user.itemConsumed) return 1;
+  if (!item || !canUseHeldItem(user)) return 1;
   if (item === "Life Orb") return 1.3;
   if (item === "Expert Belt" && typeMultiplier > 1) return 1.2;
   if (item === "Muscle Band" && move.damageClass === "physical") return 1.1;
@@ -2660,15 +2987,16 @@ function getDamageItemModifier(user, move, typeMultiplier) {
 }
 
 function getCritChance(move, user) {
-  const stage = Math.min(3, (move.critRate || 0) + ((cleanText(user.item) === "Scope Lens" && !user.itemConsumed) ? 1 : 0));
+  const stage = Math.min(3, (move.critRate || 0) + ((canUseHeldItem(user) && cleanText(user.item) === "Scope Lens") ? 1 : 0) + (abilityId(user) === "superluck" ? 1 : 0));
   if (stage <= 0) return 1 / 24;
   if (stage === 1) return 1 / 8;
   if (stage === 2) return 1 / 2;
   return 1;
 }
 
-function getMoveHitCount(move) {
+function getMoveHitCount(move, user = null) {
   if (!move.minHits || !move.maxHits) return 1;
+  if (abilityId(user) === "skilllink") return move.maxHits;
   return move.minHits === move.maxHits ? move.maxHits : move.minHits + Math.floor(Math.random() * (move.maxHits - move.minHits + 1));
 }
 
@@ -2686,6 +3014,23 @@ function abilityId(mon) {
 
 function getCustomAbility(mon) {
   return state.customAbilityById.get(abilityId(mon)) || null;
+}
+
+function getPlateType(mon) {
+  return mon && !mon.itemConsumed ? PLATE_TYPE_ITEMS[cleanText(mon.item)] || "" : "";
+}
+
+function getMemoryType(mon) {
+  return mon && !mon.itemConsumed ? MEMORY_TYPE_ITEMS[cleanText(mon.item)] || "" : "";
+}
+
+function canUseHeldItem(mon) {
+  return Boolean(mon?.item && !mon.itemConsumed && abilityId(mon) !== "klutz");
+}
+
+function getCombatantFormLabel(mon) {
+  if (!mon || !mon.currentForm || mon.currentForm === "Base") return "";
+  return `${mon.currentForm} Form`;
 }
 
 function getBattleSideForMon(mon) {
@@ -2722,15 +3067,13 @@ function isAbilitySuppressed(attacker, defender) {
 
 function isNeutralizingGasActive() {
   return ["alpha", "beta"].some((sideKey) => {
-    const mon = getActiveCombatant(sideKey);
-    return mon && !mon.fainted && abilityId(mon) === "neutralizinggas";
+    return getActiveCombatants(sideKey).some((mon) => abilityId(mon) === "neutralizinggas");
   });
 }
 
 function hasGlobalWeatherSuppression() {
   return ["alpha", "beta"].some((sideKey) => {
-    const mon = getActiveCombatant(sideKey);
-    return mon && !mon.fainted && ["airlock", "cloudnine"].includes(abilityId(mon));
+    return getActiveCombatants(sideKey).some((mon) => ["airlock", "cloudnine"].includes(abilityId(mon)));
   });
 }
 
@@ -2748,18 +3091,18 @@ function setWeather(weather, source) {
   if (!state.battle.started) return;
   if (state.battle.weather === weather) return;
   state.battle.weather = weather;
-  state.battle.weatherTurns = ["Damp Rock", "Heat Rock", "Smooth Rock", "Icy Rock"].includes(cleanText(source.item)) && !source.itemConsumed ? 8 : 5;
+  state.battle.weatherTurns = canUseHeldItem(source) && ["Damp Rock", "Heat Rock", "Smooth Rock", "Icy Rock"].includes(cleanText(source.item)) ? 8 : 5;
   appendBattleLog(source.displayName, `changed the weather to ${normalizeWeatherLabel(weather)}.`);
-  ["alpha", "beta"].forEach((sideKey) => refreshBattleFormState(getActiveCombatant(sideKey)));
+  ["alpha", "beta"].forEach((sideKey) => getActiveCombatants(sideKey).forEach(refreshBattleFormState));
 }
 
 function setTerrain(terrain, source) {
   if (!state.battle.started) return;
   if (state.battle.terrain === terrain) return;
   state.battle.terrain = terrain;
-  state.battle.terrainTurns = cleanText(source.item) === "Terrain Extender" && !source.itemConsumed ? 8 : 5;
+  state.battle.terrainTurns = canUseHeldItem(source) && cleanText(source.item) === "Terrain Extender" ? 8 : 5;
   appendBattleLog(source.displayName, `created ${normalizeTerrainLabel(terrain)}.`);
-  ["alpha", "beta"].forEach((sideKey) => refreshBattleFormState(getActiveCombatant(sideKey)));
+  ["alpha", "beta"].forEach((sideKey) => getActiveCombatants(sideKey).forEach(refreshBattleFormState));
 }
 
 function clearsStatusInWeather(mon) {
@@ -2837,11 +3180,17 @@ function isWindMove(move) {
   return moveIdMatches(move, WIND_MOVE_KEYWORDS);
 }
 
+function isPowderMove(move) {
+  return moveIdMatches(move, POWDER_MOVE_KEYWORDS);
+}
+
 function getMoveTypeForUse(user, move) {
   if (!move) return "";
   const id = abilityId(user);
   if (id === "normalize") return "Normal";
   if (id === "liquidvoice" && isSoundMove(move)) return "Water";
+  if (move.id === "judgment" && id === "multitype") return getPlateType(user) || move.type;
+  if (move.id === "multi-attack" && id === "rkssystem") return getMemoryType(user) || move.type;
   if (move.type === "Normal") {
     if (id === "pixilate") return "Fairy";
     if (id === "aerilate") return "Flying";
@@ -2908,6 +3257,16 @@ function applyForecastForm(mon) {
   mon.types = [nextType];
 }
 
+function applyMultitypeForm(mon) {
+  if (!mon || getActualAbilityId(mon) !== "multitype") return;
+  mon.types = [getPlateType(mon) || mon.originalTypes[0]];
+}
+
+function applyRksSystemForm(mon) {
+  if (!mon || getActualAbilityId(mon) !== "rkssystem") return;
+  mon.types = [getMemoryType(mon) || mon.originalTypes[0]];
+}
+
 function applyMimicry(mon) {
   if (!mon || getActualAbilityId(mon) !== "mimicry") return;
   const terrain = getActiveTerrain();
@@ -2934,6 +3293,13 @@ function applyZenModeForm(mon) {
   mon.currentForm = mon.hp <= Math.floor(mon.maxHp / 2) ? "Zen" : "Base";
 }
 
+function applyTeraShiftForm(mon) {
+  if (!mon || getActualAbilityId(mon) !== "terashift") return;
+  if (mon.currentForm !== "Stellar") appendBattleLog(mon.displayName, "shifted into its Stellar form.");
+  mon.currentForm = "Stellar";
+  mon.types = ["Stellar"];
+}
+
 function applyStanceChange(mon, move) {
   if (!mon || getActualAbilityId(mon) !== "stancechange" || !move) return;
   const nextForm = move.id === "kings-shield" ? "Shield" : "Blade";
@@ -2943,10 +3309,13 @@ function applyStanceChange(mon, move) {
 function refreshBattleFormState(mon) {
   if (!mon) return;
   applyForecastForm(mon);
+  applyMultitypeForm(mon);
+  applyRksSystemForm(mon);
   applyMimicry(mon);
   applySchoolingForm(mon);
   applyShieldsDownForm(mon);
   applyZenModeForm(mon);
+  applyTeraShiftForm(mon);
 }
 
 function matchesAbilityModifierChance(modifier) {
@@ -2976,7 +3345,7 @@ function applyCustomAbilityModifier(mon, modifier, context = {}) {
   if (modifier.action === "replace-on-faint") {
     if (modifier.targeting === "self") {
       const sideKey = getBattleSideForMon(mon);
-      if (sideKey) forceSwitch(sideKey);
+      if (sideKey) forceSwitch(sideKey, getActiveIndexes(sideKey).find((index) => getCombatantByIndex(sideKey, index) === mon));
       return true;
     }
     if (modifier.targeting === "random-opponent" || modifier.targeting === "all-opponents") {
@@ -3155,14 +3524,92 @@ function opposingActiveHasAbility(mon, abilityName) {
   if (!state.battle.started || !mon) return false;
   const sideKey = ["alpha", "beta"].find((key) => state.battle.teams[key]?.combatants?.includes(mon));
   if (!sideKey) return false;
-  const foe = getActiveCombatant(otherSideKey(sideKey));
-  return Boolean(foe && !foe.fainted && abilityId(foe) === toId(abilityName));
+  const requested = toId(abilityName);
+  return getActiveCombatants(otherSideKey(sideKey)).some((foe) => {
+    if (requested === "unnerve" && ["asoneglastrier", "asonespectrier"].includes(abilityId(foe))) return !isAbilitySuppressed(mon, foe);
+    return hasActiveAbility(foe, abilityName, mon);
+  });
+}
+
+function isTrappedByAbility(mon, foe) {
+  if (!mon || !foe || mon.fainted || foe.fainted) return false;
+  if (canUseHeldItem(mon) && cleanText(mon.item) === "Shed Shell") return false;
+  const foeAbility = abilityId(foe);
+  if (foeAbility === "shadowtag" && abilityId(mon) !== "shadowtag") return true;
+  if (foeAbility === "arenatrap" && isGrounded(mon)) return true;
+  if (foeAbility === "magnetpull" && mon.types.includes("Steel")) return true;
+  return false;
 }
 
 function countFaintedTeammates(mon) {
   const sideKey = getBattleSideForMon(mon);
   if (!sideKey) return 0;
   return state.battle.teams[sideKey].combatants.filter((teammate) => teammate !== mon && teammate.fainted).length;
+}
+
+function activeAbilityExists(abilityName) {
+  return ["alpha", "beta"].some((sideKey) => {
+    return getActiveCombatants(sideKey).some((mon) => hasActiveAbility(mon, abilityName));
+  });
+}
+
+function getAuraDamageModifier(move) {
+  if (!move?.type) return 1;
+  const fairyAura = activeAbilityExists("fairy aura");
+  const darkAura = activeAbilityExists("dark aura");
+  if ((move.type === "Fairy" && fairyAura) || (move.type === "Dark" && darkAura)) {
+    return activeAbilityExists("aura break") ? 0.75 : 4 / 3;
+  }
+  return 1;
+}
+
+function isProtosynthesisActive(mon) {
+  return abilityId(mon) === "protosynthesis" && getActiveWeather() === "sun";
+}
+
+function isQuarkDriveActive(mon) {
+  return abilityId(mon) === "quarkdrive" && getActiveTerrain() === "electric";
+}
+
+function hasActivePlusMinusPartner(mon) {
+  const sideKey = getBattleSideForMon(mon);
+  if (!sideKey) return false;
+  return getActiveCombatants(sideKey).some((active) => active !== mon && ["plus", "minus"].includes(abilityId(active)));
+}
+
+function activatePowerConstruct(mon) {
+  if (!mon || abilityId(mon) !== "powerconstruct" || mon.powerConstructed || mon.fainted || mon.hp > Math.floor(mon.maxHp / 2)) return false;
+  const oldMax = mon.maxHp;
+  mon.powerConstructed = true;
+  mon.currentForm = "Complete";
+  mon.maxHp = Math.floor(mon.maxHp * 1.5);
+  mon.stats.hp = mon.maxHp;
+  mon.hp += mon.maxHp - oldMax;
+  appendBattleLog(mon.displayName, "assembled into Complete Forme with Power Construct.");
+  return true;
+}
+
+function triggerBattleBond(attacker) {
+  if (!attacker || attacker.fainted || abilityId(attacker) !== "battlebond" || attacker.battleBonded) return false;
+  attacker.battleBonded = true;
+  attacker.currentForm = "Ash";
+  const applied = applyBoostChanges(attacker, [
+    { stat: "attack", change: 1 },
+    { stat: "spattack", change: 1 },
+    { stat: "speed", change: 1 },
+  ]);
+  appendBattleLog(attacker.displayName, applied.length ? "transformed with Battle Bond." : "activated Battle Bond.");
+  return true;
+}
+
+function clearFieldWithTeraformZero(mon) {
+  if (!mon || abilityId(mon) !== "teraformzero") return;
+  const hadField = Boolean(state.battle.weather || state.battle.terrain);
+  state.battle.weather = "";
+  state.battle.weatherTurns = 0;
+  state.battle.terrain = "";
+  state.battle.terrainTurns = 0;
+  if (hadField) appendBattleLog(mon.displayName, "reset the weather and terrain with Teraform Zero.");
 }
 
 function triggerBoostAbility(mon, boosts, text) {
@@ -3173,10 +3620,20 @@ function triggerBoostAbility(mon, boosts, text) {
 function triggerFaintAbilities(faintedMon, source = {}) {
   const attacker = source.attacker;
   if (attacker && attacker !== faintedMon && !attacker.fainted) {
+    if (abilityId(faintedMon) === "innardsout" && source.damageTaken) {
+      applyDirectDamage(attacker, Math.max(1, source.damageTaken), "Innards Out");
+    }
     const attackerAbility = abilityId(attacker);
+    if (["receiver", "powerofalchemy"].includes(attackerAbility) && faintedMon.ability && !UNSWAPPABLE_ABILITIES.has(abilityId(faintedMon))) {
+      attacker.ability = faintedMon.ability;
+      appendBattleLog(attacker.displayName, `copied ${faintedMon.displayName}'s ability with ${attackerAbility === "receiver" ? "Receiver" : "Power of Alchemy"}.`);
+    }
+    triggerBattleBond(attacker);
     if (attackerAbility === "moxie") triggerBoostAbility(attacker, [{ stat: "attack", change: 1 }], "raised its Attack with Moxie.");
     if (attackerAbility === "chillingneigh") triggerBoostAbility(attacker, [{ stat: "attack", change: 1 }], "raised its Attack with Chilling Neigh.");
+    if (attackerAbility === "asoneglastrier") triggerBoostAbility(attacker, [{ stat: "attack", change: 1 }], "raised its Attack with As One.");
     if (attackerAbility === "grimneigh") triggerBoostAbility(attacker, [{ stat: "spattack", change: 1 }], "raised its Sp. Atk with Grim Neigh.");
+    if (attackerAbility === "asonespectrier") triggerBoostAbility(attacker, [{ stat: "spattack", change: 1 }], "raised its Sp. Atk with As One.");
     if (attackerAbility === "beastboost") {
       const bestStat = getHighestStatKey(attacker);
       triggerBoostAbility(attacker, [{ stat: bestStat, change: 1 }], `raised its ${STAT_LABELS[bestStat]} with Beast Boost.`);
@@ -3198,6 +3655,7 @@ function getAbilityPriorityBonus(mon, move) {
   if (id === "prankster" && move.damageClass === "status") bonus += 1;
   if (id === "galewings" && move.type === "Flying" && mon.hp === mon.maxHp) bonus += 1;
   if (id === "triage" && isHealingMove(move)) bonus += 3;
+  if (id === "myceliummight" && move.damageClass === "status") bonus -= 0.1;
   if (id === "stall") bonus -= 0.1;
   return bonus;
 }
@@ -3237,13 +3695,20 @@ function getOffensiveAbilityModifier(user, target, move, typeMultiplier) {
   if (id === "overgrow" && move.type === "Grass" && user.hp <= Math.floor(user.maxHp / 3)) modifier *= 1.5;
   if (id === "swarm" && move.type === "Bug" && user.hp <= Math.floor(user.maxHp / 3)) modifier *= 1.5;
   if (id === "guts" && move.damageClass === "physical" && user.status) modifier *= 1.5;
+  if (id === "hustle" && move.damageClass === "physical") modifier *= 1.5;
   if (id === "toxicboost" && move.damageClass === "physical" && (user.status === "poison" || user.status === "tox")) modifier *= 1.5;
   if (id === "flareboost" && move.damageClass === "special" && user.status === "burn") modifier *= 1.5;
   if (id === "flashfire" && user.flashFireBoost && move.type === "Fire") modifier *= 1.5;
   if (id === "waterbubble" && move.type === "Water") modifier *= 2;
   if (id === "tintedlens" && typeMultiplier > 0 && typeMultiplier < 1) modifier *= 2;
   if (id === "solarpower" && getActiveWeather() === "sun" && move.damageClass === "special") modifier *= 1.5;
+  if (id === "battery" && move.damageClass === "special") modifier *= 1.3;
+  if (id === "powerspot") modifier *= 1.3;
+  if (["plus", "minus"].includes(id) && hasActivePlusMinusPartner(user) && move.damageClass === "special") modifier *= 1.5;
+  if (id === "analytic" && target && getModifiedBattleStat(user, "speed") < getModifiedBattleStat(target, "speed")) modifier *= 1.3;
+  if (id === "stakeout" && target?.switchedInThisTurn) modifier *= 2;
   if (id === "sheerforce" && move.damageClass !== "status" && moveHasSecondaryEffects(move)) modifier *= 1.3;
+  if (id === "sandforce" && getActiveWeather() === "sand" && ["Rock", "Ground", "Steel"].includes(move.type)) modifier *= 1.3;
   if (id === "strongjaw" && isBiteMove(move)) modifier *= 1.5;
   if (id === "ironfist" && isPunchMove(move)) modifier *= 1.2;
   if (id === "megalauncher" && isPulseMove(move)) modifier *= 1.5;
@@ -3252,6 +3717,7 @@ function getOffensiveAbilityModifier(user, target, move, typeMultiplier) {
   if (id === "punkrock" && isSoundMove(move)) modifier *= 1.3;
   if (id === "rockypayload" && move.type === "Rock") modifier *= 1.5;
   if (id === "steelworker" && move.type === "Steel") modifier *= 1.5;
+  if (id === "steelyspirit" && move.type === "Steel") modifier *= 1.5;
   if (id === "transistor" && move.type === "Electric") modifier *= 1.3;
   if (id === "dragonsmaw" && move.type === "Dragon") modifier *= 1.5;
   if (id === "neuroforce" && typeMultiplier > 1) modifier *= 1.25;
@@ -3279,6 +3745,9 @@ function getDefensiveAbilityModifier(attacker, defender, move, typeMultiplier) {
     if (move.type === "Fire") modifier *= 2;
     else if (isContactMove(move)) modifier *= 0.5;
   }
+  if (id === "friendguard") modifier *= 0.75;
+  if (id === "purifyingsalt" && move.type === "Ghost") modifier *= 0.5;
+  if (id === "terashell" && defender.hp === defender.maxHp && typeMultiplier > 0) modifier *= 0.5 / typeMultiplier;
   return modifier;
 }
 
@@ -3286,7 +3755,11 @@ function handleAbilityMoveImmunity(attacker, defender, move) {
   if (!defender || !move || isAbilitySuppressed(attacker, defender)) return false;
   if (handleCustomAbilityMoveImmunity(attacker, defender, move)) return true;
   const id = getActualAbilityId(defender);
-  if (id === "soundproof" && isSoundMove(move)) {
+  if (id === "overcoat" && isPowderMove(move)) {
+    appendBattleLog(defender.displayName, "ignored the powder move with Overcoat.");
+    return true;
+  }
+  if (["soundproof", "cacophony"].includes(id) && isSoundMove(move)) {
     appendBattleLog(defender.displayName, "ignored the sound move with Soundproof.");
     return true;
   }
@@ -3360,7 +3833,7 @@ function handleAbilityMoveImmunity(attacker, defender, move) {
     appendBattleLog(defender.displayName, "is protected by Wonder Guard.");
     return true;
   }
-  if (id === "goodasgold" && move.damageClass === "status") {
+  if (id === "goodasgold" && move.damageClass === "status" && abilityId(attacker) !== "myceliummight") {
     appendBattleLog(defender.displayName, "blocked the status move with Good as Gold.");
     return true;
   }
@@ -3372,6 +3845,7 @@ function canReceiveStatus(mon, status, source = null) {
   const id = getActualAbilityId(mon);
   if (!id || (source && isAbilitySuppressed(source, mon))) return true;
   if (id === "leafguard" && getActiveWeather() === "sun") return false;
+  if (id === "flowerveil" && mon.types.includes("Grass")) return false;
   if (["comatose", "purifyingsalt"].includes(id)) return false;
   if (status === "burn" && ["waterveil", "waterbubble"].includes(id)) return false;
   if (status === "paralysis" && id === "limber") return false;
@@ -3397,8 +3871,12 @@ function isContactMove(move) {
   return move.target === "selected-pokemon" || move.target === "random-opponent";
 }
 
+function makesContact(attacker, move) {
+  return abilityId(attacker) !== "longreach" && isContactMove(move);
+}
+
 function applyContactAbilityEffects(attacker, defender, move) {
-  if (!attacker || !defender || attacker.fainted || !isContactMove(move) || isAbilitySuppressed(attacker, defender)) return;
+  if (!attacker || !defender || attacker.fainted || !makesContact(attacker, move) || isAbilitySuppressed(attacker, defender)) return;
   const id = getActualAbilityId(defender);
   if (["roughskin", "ironbarbs"].includes(id)) {
     applyDirectDamage(attacker, Math.max(1, Math.floor(attacker.maxHp / 8)), defender.ability || "contact recoil");
@@ -3420,6 +3898,9 @@ function applyContactAbilityEffects(attacker, defender, move) {
   if (id === "poisonpoint" && Math.random() < 0.3) {
     if (inflictMajorStatus(attacker, "poison")) appendBattleLog(attacker.displayName, "was poisoned by Poison Point.");
     return;
+  }
+  if (abilityId(attacker) === "poisontouch" && Math.random() < 0.3) {
+    if (inflictMajorStatus(defender, "poison", { source: attacker })) appendBattleLog(defender.displayName, "was poisoned by Poison Touch.");
   }
   if (id === "effectspore" && !attacker.types.includes("Grass") && Math.random() < 0.3) {
     const roll = Math.random();
@@ -3448,7 +3929,7 @@ function applyContactAbilityEffects(attacker, defender, move) {
 }
 
 function applyAftermathAbility(attacker, defender, move) {
-  if (!attacker || attacker.fainted || !defender || !isContactMove(move) || isAbilitySuppressed(attacker, defender)) return;
+  if (!attacker || attacker.fainted || !defender || !makesContact(attacker, move) || isAbilitySuppressed(attacker, defender)) return;
   if (getActualAbilityId(defender) === "aftermath") {
     applyDirectDamage(attacker, Math.max(1, Math.floor(attacker.maxHp / 4)), "Aftermath");
   }
@@ -3457,6 +3938,12 @@ function applyAftermathAbility(attacker, defender, move) {
 function applyDamageTakenAbilityEffects(attacker, defender, move) {
   if (!attacker || !defender || defender.fainted || isAbilitySuppressed(attacker, defender)) return;
   const id = getActualAbilityId(defender);
+  if (id === "gulpmissile" && defender.gulpMissileLoaded) {
+    defender.gulpMissileLoaded = false;
+    applyDirectDamage(attacker, Math.max(1, Math.floor(attacker.maxHp / 4)), "Gulp Missile");
+    const applied = applyBoostChanges(attacker, [{ stat: "defense", change: -1 }], defender);
+    if (applied.length) appendBattleLog(attacker.displayName, "had its Defense lowered by Gulp Missile.");
+  }
   if (id === "stamina") {
     triggerBoostAbility(defender, [{ stat: "defense", change: 1 }], "raised its Defense with Stamina.");
   }
@@ -3498,6 +3985,9 @@ function applyDamageTakenAbilityEffects(attacker, defender, move) {
     defender.chargedMoveBoost = true;
     appendBattleLog(defender.displayName, "became charged with Wind Power.");
   }
+  if (id === "steamengine" && (move.type === "Fire" || move.type === "Water")) {
+    triggerBoostAbility(defender, [{ stat: "speed", change: 6 }], "raised its Speed with Steam Engine.");
+  }
   if (id === "thermalexchange" && move.type === "Fire") {
     triggerBoostAbility(defender, [{ stat: "attack", change: 1 }], "raised its Attack with Thermal Exchange.");
   }
@@ -3506,11 +3996,15 @@ function applyDamageTakenAbilityEffects(attacker, defender, move) {
     if (sideKey && placeHazard(sideKey, "toxic-spikes")) appendBattleLog(defender.displayName, "scattered Toxic Spikes with Toxic Debris.");
   }
   if (id === "cursedbody" && attacker.lastMoveUsed && Math.random() < 0.3) {
+    if (abilityId(attacker) === "aromaveil") {
+      appendBattleLog(attacker.displayName, "protected itself from Disable with Aroma Veil.");
+      return;
+    }
     attacker.disabledMove = attacker.lastMoveUsed;
     attacker.disabledTurns = 4;
     appendBattleLog(attacker.displayName, `${attacker.lastMoveUsed} was disabled by Cursed Body.`);
   }
-  if (id === "perishbody" && isContactMove(move)) {
+  if (id === "perishbody" && makesContact(attacker, move)) {
     attacker.perishCount = 3;
     defender.perishCount = 3;
     appendBattleLog(defender.displayName, "started a perish count with Perish Body.");
@@ -3521,6 +4015,27 @@ function applyDamageTakenAbilityEffects(attacker, defender, move) {
   }
   if (id === "sandspit") setWeather("sand", defender);
   if (id === "seedsower") setTerrain("grassy", defender);
+}
+
+function applyAttackerAfterHitAbilities(attacker, defender, move, totalDamage) {
+  if (!attacker || attacker.fainted || !defender || defender.fainted || totalDamage <= 0) return;
+  if (abilityId(attacker) === "toxicchain" && Math.random() < 0.3) {
+    if (inflictMajorStatus(defender, "tox", { source: attacker })) appendBattleLog(defender.displayName, "was badly poisoned by Toxic Chain.");
+  }
+}
+
+function triggerDancerCopies(user, move) {
+  if (!moveIdMatches(move, ["dance"]) || user.dancerMoveCopied === move.id) return;
+  const dancer = getActiveCombatant(otherSideKey(getBattleSideForMon(user)));
+  if (!dancer || dancer.fainted || abilityId(dancer) !== "dancer") return;
+  dancer.dancerMoveCopied = move.id;
+  if (move.boosts?.length && SELF_TARGETS.has(move.target)) {
+    const applied = applyBoostChanges(dancer, move.boosts);
+    if (applied.length) appendBattleLog(dancer.displayName, `copied ${move.name || move.id} with Dancer: ${describeBoostChanges(applied)}.`);
+  } else {
+    appendBattleLog(dancer.displayName, `danced along with ${move.name || move.id}.`);
+  }
+  dancer.dancerMoveCopied = "";
 }
 
 function canStealItem(source, target) {
@@ -3548,7 +4063,7 @@ function applyItemTheftAbilities(attacker, defender, move, totalDamage) {
   if (abilityId(attacker) === "magician" && !attacker.stolenItemThisTurn) {
     attacker.stolenItemThisTurn = stealItem(attacker, defender, "Magician");
   }
-  if (getActualAbilityId(defender) === "pickpocket" && isContactMove(move) && !defender.stolenItemThisTurn) {
+  if (getActualAbilityId(defender) === "pickpocket" && makesContact(attacker, move) && !defender.stolenItemThisTurn) {
     defender.stolenItemThisTurn = stealItem(defender, attacker, "Pickpocket");
   }
 }
@@ -3604,11 +4119,11 @@ function placeHazard(sideKey, moveId) {
   return false;
 }
 
-function applyEntryHazards(sideKey) {
-  const mon = getActiveCombatant(sideKey);
+function applyEntryHazards(sideKey, incomingMon = null) {
+  const mon = incomingMon || getActiveCombatant(sideKey);
   const hazards = state.battle.hazards[sideKey];
   if (!mon || mon.fainted || !hazards) return;
-  if (cleanText(mon.item) === "Heavy-Duty Boots" && !mon.itemConsumed) {
+  if (canUseHeldItem(mon) && cleanText(mon.item) === "Heavy-Duty Boots") {
     appendBattleLog(mon.displayName, "ignored entry hazards with Heavy-Duty Boots.");
     return;
   }
@@ -3656,27 +4171,89 @@ function applySwitchOutAbilities(mon) {
   mon.ability = mon.originalAbility;
 }
 
-function applySwitchInAbilities(sideKey, mode) {
-  const mon = getActiveCombatant(sideKey);
-  const foe = getActiveCombatant(otherSideKey(sideKey));
+function applySwitchInAbilities(sideKey, mode, incomingMon = null) {
+  const mon = incomingMon || getActiveCombatant(sideKey);
+  const activeIndex = getActiveIndexes(sideKey).find((index) => getCombatantByIndex(sideKey, index) === mon);
+  const foe = getOpposingTarget(sideKey, activeIndex);
   if (!mon || mon.fainted) return;
   const id = getActualAbilityId(mon);
   runCustomAbilityEvent(mon, "switch-in", { opponent: foe });
   runCustomAbilityEvent(mon, "weather-terrain", { opponent: foe });
   if (id === "intimidate" && foe && !foe.fainted && hasActiveAbility(mon, "intimidate")) {
-    const applied = applyBoostChanges(foe, [{ stat: "attack", change: -1 }], mon);
-    if (applied.length) appendBattleLog(mon.displayName, `lowered ${foe.displayName}'s Attack with Intimidate.`);
+    if (["innerfocus", "owntempo", "scrappy", "guarddog", "oblivious"].includes(abilityId(foe))) {
+      appendBattleLog(foe.displayName, `blocked Intimidate with ${foe.ability}.`);
+      if (abilityId(foe) === "guarddog") triggerBoostAbility(foe, [{ stat: "attack", change: 1 }], "raised its Attack with Guard Dog.");
+    } else {
+      const applied = applyBoostChanges(foe, [{ stat: "attack", change: -1 }], mon);
+      if (applied.length) appendBattleLog(mon.displayName, `lowered ${foe.displayName}'s Attack with Intimidate.`);
+    }
   }
   if (id === "intrepidsword") triggerBoostAbility(mon, [{ stat: "attack", change: 1 }], "raised its Attack with Intrepid Sword.");
   if (id === "dauntlessshield") triggerBoostAbility(mon, [{ stat: "defense", change: 1 }], "raised its Defense with Dauntless Shield.");
+  if (id === "hospitality") {
+    const healed = healCombatant(mon, Math.max(1, Math.floor(mon.maxHp / 4)));
+    if (healed > 0) appendBattleLog(mon.displayName, "restored HP with Hospitality.");
+  }
+  if (id === "costar" && foe && !foe.fainted) {
+    mon.boosts = { ...foe.boosts };
+    appendBattleLog(mon.displayName, `copied ${foe.displayName}'s stat changes with Costar.`);
+  }
+  if (id === "curiousmedicine") {
+    const cleared = BATTLE_STAGE_KEYS.some((stat) => mon.boosts[stat] < 0);
+    BATTLE_STAGE_KEYS.forEach((stat) => {
+      if (mon.boosts[stat] < 0) mon.boosts[stat] = 0;
+    });
+    if (cleared) appendBattleLog(mon.displayName, "cleared its stat drops with Curious Medicine.");
+  }
+  if (id === "pastelveil" && (mon.status === "poison" || mon.status === "tox")) {
+    mon.status = "";
+    mon.toxicCounter = 0;
+    appendBattleLog(mon.displayName, "was cured of poison by Pastel Veil.");
+  }
+  if (id === "sweetveil" && mon.status === "sleep") {
+    mon.status = "";
+    mon.statusTurns = 0;
+    appendBattleLog(mon.displayName, "woke up with Sweet Veil.");
+  }
+  if (id === "download" && foe && !foe.fainted) {
+    const stat = getModifiedBattleStat(foe, "defense") <= getModifiedBattleStat(foe, "spdefense") ? "attack" : "spattack";
+    triggerBoostAbility(mon, [{ stat, change: 1 }], `raised its ${STAT_LABELS[stat]} with Download.`);
+  }
+  if (id === "forewarn" && foe && !foe.fainted) {
+    const strongest = foe.moves
+      .map((moveSlot) => getBattleMove(moveSlot.name))
+      .filter(Boolean)
+      .sort((left, right) => (right.power || 0) - (left.power || 0))[0];
+    if (strongest) appendBattleLog(mon.displayName, `forewarned ${strongest.name || strongest.id}.`);
+  }
+  if (id === "anticipation" && foe && !foe.fainted) {
+    const dangerous = foe.moves
+      .map((moveSlot) => getBattleMove(moveSlot.name))
+      .filter(Boolean)
+      .some((move) => move.category === "ohko" || getMoveTypeMultiplier(foe, move, mon) > 1);
+    if (dangerous) appendBattleLog(mon.displayName, "shuddered with Anticipation.");
+  }
+  if (id === "supersweetsyrup" && foe && !foe.fainted) {
+    const applied = applyBoostChanges(foe, [{ stat: "evasion", change: -1 }], mon);
+    if (applied.length) appendBattleLog(mon.displayName, `lowered ${foe.displayName}'s evasiveness with Supersweet Syrup.`);
+  }
   if (id === "drizzle") setWeather("rain", mon);
   if (id === "drought") setWeather("sun", mon);
+  if (id === "desolateland") setWeather("sun", mon);
+  if (id === "primordialsea") setWeather("rain", mon);
+  if (id === "orichalcumpulse") setWeather("sun", mon);
   if (id === "sandstream") setWeather("sand", mon);
   if (id === "snowwarning") setWeather("snow", mon);
   if (id === "electricsurge") setTerrain("electric", mon);
+  if (id === "hadronengine") setTerrain("electric", mon);
   if (id === "grassysurge") setTerrain("grassy", mon);
   if (id === "mistysurge") setTerrain("misty", mon);
   if (id === "psychicsurge") setTerrain("psychic", mon);
+  clearFieldWithTeraformZero(mon);
+  if (id === "embodyaspect") {
+    const bestStat = getHighestStatKey(mon);
+    triggerBoostAbility(mon, [{ stat: bestStat, change: 1 }], `raised its ${STAT_LABELS[bestStat]} with Embody Aspect.`);
+  }
   if (id === "trace" && foe && foe.ability) {
     mon.ability = stripTypeChangingAbility(foe.ability) || foe.ability;
     appendBattleLog(mon.displayName, `copied ${foe.displayName}'s ability with Trace.`);
@@ -3704,6 +4281,12 @@ function inflictMajorStatus(mon, status, move = {}) {
   mon.toxicCounter = 0;
   mon.statusTurns = status === "sleep" ? (move.sleepTurns || randomBetween(1, 3)) : 0;
   if (maybeUseStatusCureItem(mon, status)) return false;
+  if ((status === "poison" || status === "tox") && move.source && abilityId(move.source) === "poisonpuppeteer") {
+    if (inflictConfusion(mon, { source: move.source })) appendBattleLog(mon.displayName, "became confused by Poison Puppeteer.");
+  }
+  if (move.source && abilityId(mon) === "synchronize" && ["burn", "poison", "tox", "paralysis"].includes(status)) {
+    if (inflictMajorStatus(move.source, status, { source: mon })) appendBattleLog(move.source.displayName, `was affected by Synchronize.`);
+  }
   return true;
 }
 
@@ -3717,10 +4300,10 @@ function inflictConfusion(mon, move) {
 
 function maybeUseStatusCureItem(mon, incomingStatus) {
   const item = cleanText(mon.item);
-  if (mon.itemConsumed || !item) return false;
+  if (!item || !canUseHeldItem(mon)) return false;
   if (opposingActiveHasAbility(mon, "unnerve") && /Berry/i.test(item)) return false;
   if (item === "Lum Berry" && (incomingStatus || mon.status || mon.confusionTurns > 0)) {
-    mon.itemConsumed = true;
+    consumeItem(mon);
     mon.status = "";
     mon.statusTurns = 0;
     mon.toxicCounter = 0;
@@ -3729,7 +4312,7 @@ function maybeUseStatusCureItem(mon, incomingStatus) {
     return true;
   }
   if (item === "Chesto Berry" && incomingStatus === "sleep") {
-    mon.itemConsumed = true;
+    consumeItem(mon);
     mon.status = "";
     mon.statusTurns = 0;
     appendBattleLog(mon.displayName, "woke up with Chesto Berry.");
@@ -3740,18 +4323,12 @@ function maybeUseStatusCureItem(mon, incomingStatus) {
 
 function applyThresholdItem(mon) {
   const item = cleanText(mon.item);
-  if (!item || mon.itemConsumed || mon.fainted || mon.hp <= 0 || mon.hp > Math.floor(mon.maxHp / 2)) return;
+  const threshold = abilityId(mon) === "gluttony" ? Math.floor(mon.maxHp / 2) : (["Figy Berry", "Wiki Berry", "Mago Berry", "Aguav Berry", "Iapapa Berry"].includes(item) ? Math.floor(mon.maxHp / 4) : Math.floor(mon.maxHp / 2));
+  if (!item || !canUseHeldItem(mon) || mon.fainted || mon.hp <= 0 || mon.hp > threshold) return;
   if (opposingActiveHasAbility(mon, "unnerve") && /Berry/i.test(item)) return;
-  if (item === "Sitrus Berry") {
-    mon.itemConsumed = true;
-    healCombatant(mon, Math.max(1, Math.floor(mon.maxHp / 4)));
-    appendBattleLog(mon.displayName, "restored HP with Sitrus Berry.");
+  if (item === "Sitrus Berry" || item === "Oran Berry" || ["Figy Berry", "Wiki Berry", "Mago Berry", "Aguav Berry", "Iapapa Berry"].includes(item)) {
+    useBerryItem(mon, item);
     return;
-  }
-  if (item === "Oran Berry") {
-    mon.itemConsumed = true;
-    healCombatant(mon, 10);
-    appendBattleLog(mon.displayName, "restored HP with Oran Berry.");
   }
 }
 
@@ -3771,6 +4348,14 @@ function applyBoostChanges(mon, boosts, source = null, options = {}) {
     const monAbility = abilityId(mon);
     if (blockedByOpponent && STAT_DROP_BLOCK_ABILITIES.has(monAbility)) {
       appendBattleLog(mon.displayName, `${mon.ability || "Its ability"} blocked the stat drop.`);
+      return;
+    }
+    if (blockedByOpponent && monAbility === "bigpecks" && boost.stat === "defense") {
+      appendBattleLog(mon.displayName, "blocked the Defense drop with Big Pecks.");
+      return;
+    }
+    if (blockedByOpponent && monAbility === "flowerveil" && mon.types.includes("Grass")) {
+      appendBattleLog(mon.displayName, "blocked the stat drop with Flower Veil.");
       return;
     }
     if (blockedByOpponent && monAbility === "mirrorarmor") {
@@ -3798,7 +4383,21 @@ function applyBoostChanges(mon, boosts, source = null, options = {}) {
       if (triggered.length) appendBattleLog(mon.displayName, "raised its Sp. Atk with Competitive.");
     }
   }
+  triggerOpportunist(mon, actual, options);
   return actual;
+}
+
+function triggerOpportunist(boostedMon, appliedBoosts, options = {}) {
+  if (options.opportunist || !appliedBoosts.some((boost) => boost.change > 0)) return;
+  const sideKey = getBattleSideForMon(boostedMon);
+  if (!sideKey) return;
+  const opportunist = getActiveCombatant(otherSideKey(sideKey));
+  if (!opportunist || opportunist.fainted || abilityId(opportunist) !== "opportunist") return;
+  const copied = appliedBoosts
+    .filter((boost) => boost.change > 0)
+    .map((boost) => ({ stat: boost.stat, change: boost.change }));
+  const applied = applyBoostChanges(opportunist, copied, null, { opportunist: true });
+  if (applied.length) appendBattleLog(opportunist.displayName, "copied the stat boosts with Opportunist.");
 }
 
 function getBoostEffectChance(move, user = null) {
@@ -3837,8 +4436,58 @@ function countLivingCombatants(sideKey) {
 }
 
 function getActiveCombatant(sideKey) {
+  return getActiveCombatants(sideKey)[0] || null;
+}
+
+function getCombatantByIndex(sideKey, index) {
   const team = state.battle.teams[sideKey];
-  return team?.combatants?.[team.active] || null;
+  return team?.combatants?.[index] || null;
+}
+
+function isDoubleBattle() {
+  return state.battle.mode === "doubles";
+}
+
+function getActiveIndexes(sideKey) {
+  const team = state.battle.teams[sideKey];
+  if (!team) return [];
+  const raw = Array.isArray(team.active) ? team.active : [team.active];
+  return raw.filter((index) => Number.isInteger(index) && team.combatants[index] && !team.combatants[index].fainted);
+}
+
+function getActiveCombatants(sideKey) {
+  return getActiveIndexes(sideKey).map((index) => getCombatantByIndex(sideKey, index)).filter(Boolean);
+}
+
+function getPrimaryActiveIndex(sideKey) {
+  return getActiveIndexes(sideKey)[0] ?? 0;
+}
+
+function setActiveIndex(sideKey, fromIndex, toIndex) {
+  const team = state.battle.teams[sideKey];
+  if (!team) return;
+  if (!Array.isArray(team.active)) {
+    team.active = toIndex;
+    return;
+  }
+  const slot = team.active.indexOf(fromIndex);
+  if (slot >= 0) team.active[slot] = toIndex;
+  else team.active[0] = toIndex;
+}
+
+function getOpposingTarget(sideKey, userIndex = getPrimaryActiveIndex(sideKey)) {
+  const foeSide = otherSideKey(sideKey);
+  const foeIndexes = getActiveIndexes(foeSide);
+  if (!foeIndexes.length) return null;
+  if (!isDoubleBattle()) return getCombatantByIndex(foeSide, foeIndexes[0]);
+  const allyIndexes = getActiveIndexes(sideKey);
+  const slot = Math.max(0, allyIndexes.indexOf(userIndex));
+  return getCombatantByIndex(foeSide, foeIndexes[Math.min(slot, foeIndexes.length - 1)]) || getCombatantByIndex(foeSide, foeIndexes[0]);
+}
+
+function areAllBattleActionsQueued() {
+  if (!state.battle.started || state.battle.winner) return false;
+  return ["alpha", "beta"].every((sideKey) => getActiveIndexes(sideKey).every((activeIndex) => Boolean(state.battle.pendingActions[sideKey]?.[activeIndex])));
 }
 
 function getBattleItemLabel(mon) {
